@@ -175,13 +175,13 @@ jobs:
               --format table "$i" 2>/dev/null | tail -30
           done
 
-      - name: "R5 · Conteo por severidad"
+      - name: "R5 · Resumen por severidad, paquete y versión corregida"
         run: |
           for i in perfil-api:ingenua ghcr.io/rafaaas17/perfil-api:1.0 ghcr.io/rafaaas17/perfil-web:1.0 perfil-db:1.0; do
             echo "---- $i ----"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
               aquasec/trivy:0.58.0 image --scanners vuln --format json "$i" 2>/dev/null > trivy.json
-            python3 -c "import json,collections; d=json.load(open('trivy.json')); c=collections.Counter(v['Severity'] for r in (d.get('Results') or []) for v in (r.get('Vulnerabilities') or [])); print('  total:', sum(c.values()), ' ', dict(c) if c else '(ninguna)')"
+            python3 .github/scripts/resumen-trivy.py trivy.json
           done
 
       - name: "Logs de los servicios"

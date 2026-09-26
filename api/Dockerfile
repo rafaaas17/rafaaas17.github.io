@@ -52,5 +52,16 @@ COPY --from=build /out/api /usr/local/bin/api
 # entorno en tiempo de ejecución.
 EXPOSE 3000
 
+# Reto 2: el healthcheck viaja DENTRO de la imagen, no en compose.yaml.
+#
+# /api/health no dice "estoy vivo": intenta hablar con Postgres y devuelve 503
+# si no puede. Un proceso levantado que no alcanza su base de datos no está
+# sano, y así compose no da por bueno el arranque antes de tiempo.
+#
+# Forma shell (sin corchetes) a propósito: así ${PORT} se expande en tiempo de
+# ejecución y el chequeo sigue al puerto que realmente esté escuchando.
+# wget es el de busybox, que ya viene en alpine: no hace falta instalar curl.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5     CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-3000}/api/health" || exit 1
+
 # Regla 4: un proceso, en forma exec, para que sea PID 1 y reciba SIGTERM.
 ENTRYPOINT ["/usr/local/bin/api"]

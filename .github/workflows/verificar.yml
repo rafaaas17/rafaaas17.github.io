@@ -1,0 +1,189 @@
+# Verificación de los criterios de aceptación del LAB-02.
+#
+# Cada reto pide demostrar algo con un comando. Este workflow ejecuta esos
+# comandos sobre un runner limpio, de modo que la evidencia de la bitácora no
+# dependa de cómo esté mi máquina hoy: cualquiera puede lanzarlo desde
+# Actions → Verificar los retos → Run workflow y comparar.
+
+name: Verificar los retos
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Commit en el que la API todavía tenía el Dockerfile de una sola etapa.
+  # Es el "antes" del Reto 1 y del Reto 5.
+  DOCKERFILE_INGENUO: 976ca7c
+
+jobs:
+  verificar:
+    name: Ejecutar los criterios de aceptación
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Clonar el repositorio con todo el historial
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preparar el .env igual que hace el Codespace
+        run: bash .devcontainer/preparar-entorno.sh
+
+      # ─────────────────────────── B1 y Reto 2 ───────────────────────────
+      - name: "B1 + R2 · Levantar con --wait"
+        run: docker compose up -d --build --wait --wait-timeout 600
+
+      - name: "R2 · docker compose ps"
+        run: docker compose ps
+
+      - name: "B1 · El perfil se sirve y la API responde"
+        run: |
+          echo "---- GET / ----"
+          curl -fsS http://localhost:8080/ | grep -o "<title>.*</title>"
+          echo "---- GET /healthz ----"
+          curl -fsS http://localhost:8080/healthz
+          echo "---- GET /api/health ----"
+          curl -fsS http://localhost:8080/api/health; echo
+          echo "---- GET /api/mensajes (datos de init) ----"
+          curl -fsS http://localhost:8080/api/mensajes; echo
+
+      - name: "B1 · Dejar un mensaje en el libro de visitas"
+        run: |
+          echo "---- POST /api/mensajes ----"
+          curl -fsS -X POST http://localhost:8080/api/mensajes \
+            -H "Content-Type: application/json" \
+            -d '{"nombre":"Verificacion automatica","mensaje":"Mensaje escrito por el workflow."}'
+          echo
+          echo "---- validacion: mensaje de mas de 280 caracteres ----"
+          LARGO=$(python3 -c "print('a' * 281)")
+          curl -s -o /dev/null -w "HTTP %{http_code}\n" -X POST http://localhost:8080/api/mensajes \
+            -H "Content-Type: application/json" \
+            -d "{\"nombre\":\"x\",\"mensaje\":\"$LARGO\"}"
+
+      # ───────────────────────────── B2 ─────────────────────────────
+      - name: "B2 · Los mensajes sobreviven a down / up"
+        run: |
+          docker compose down
+          docker compose up -d --wait --wait-timeout 600
+          echo "---- GET /api/mensajes despues de down/up ----"
+          curl -fsS http://localhost:8080/api/mensajes; echo
+
+      # ─────────────────────────── Reto 3 ───────────────────────────
+      - name: "R3 · Nadie es root"
+        run: |
+          for s in web api db; do printf "%-4s " "$s"; docker compose exec -T "$s" whoami; done
+          echo "---- id completo ----"
+          for s in web api db; do printf "%-4s " "$s"; docker compose exec -T "$s" id; done
+
+      # ─────────────────────────── Reto 4 ───────────────────────────
+      - name: "R4 · Red segmentada"
+        run: |
+          echo "---- redes de la aplicacion ----"
+          docker network ls --filter name=perfil
+          echo
+          echo "---- desde api: getent hosts db ----"
+          docker compose exec -T api getent hosts db && echo "OK: api resuelve db"
+          echo
+          echo "---- desde web: getent hosts db ----"
+          if docker compose exec -T web getent hosts db; then
+            echo "FALLO: web resuelve db"
+            exit 1
+          else
+            echo "OK: desde web el nombre db no resuelve"
+          fi
+          echo
+          echo "---- puertos publicados hacia el host ----"
+          docker compose ps --format "table {{.Service}}\t{{.Ports}}"
+
+      # ─────────────────────────── Reto 1 ───────────────────────────
+      - name: "R1 · Construir la version ingenua (una sola etapa)"
+        run: |
+          git show "$DOCKERFILE_INGENUO:api/Dockerfile" > api/Dockerfile.ingenuo
+          echo "---- Dockerfile ingenuo ----"
+          cat api/Dockerfile.ingenuo
+          docker build -q -f api/Dockerfile.ingenuo -t perfil-api:ingenua ./api
+
+      - name: "R1 · Tabla antes / despues"
+        run: |
+          echo "---- docker images ----"
+          docker images --format "table {{.Repository}}:{{.Tag}}\t{{.Size}}" | grep -E "REPOSITORY|perfil"
+          echo
+          echo "---- tamano exacto en bytes ----"
+          for i in perfil-api:ingenua ghcr.io/rafaaas17/perfil-api:1.0 ghcr.io/rafaaas17/perfil-web:1.0 perfil-db:1.0; do
+            printf "%-42s %s\n" "$i" "$(docker image inspect "$i" --format "{{.Size}}")"
+          done
+
+      - name: "R1 · docker history de la imagen final"
+        run: docker history ghcr.io/rafaaas17/perfil-api:1.0 --no-trunc --format "table {{.Size}}\t{{.CreatedBy}}"
+
+      - name: "R1 · La imagen final no trae compilador ni cache de paquetes"
+        run: |
+          printf "hay binario de go?  "
+          docker run --rm --entrypoint sh ghcr.io/rafaaas17/perfil-api:1.0 -c "command -v go || echo 'no, ninguno'"
+          printf "hay cache de apk?   "
+          docker run --rm --entrypoint sh ghcr.io/rafaaas17/perfil-api:1.0 -c "ls -A /var/cache/apk | head -1 || true; echo '(vacio si no hay salida arriba)'"
+          printf "hay codigo fuente?  "
+          docker run --rm --entrypoint sh ghcr.io/rafaaas17/perfil-api:1.0 -c "ls /src 2>/dev/null || echo 'no existe /src'"
+          printf "que hay en la imagen (primer nivel): "
+          docker run --rm --entrypoint sh ghcr.io/rafaaas17/perfil-api:1.0 -c "ls /"
+
+      # ─────────────────────────── Reto 6 ───────────────────────────
+      - name: "R6 · Ninguna capa de las imagenes contiene credenciales"
+        run: |
+          echo "---- git log --all --full-history -- .env ----"
+          git log --all --full-history -- .env > env-log.txt
+          if [ -s env-log.txt ]; then cat env-log.txt; echo "FALLO"; exit 1; fi
+          echo "(salida vacia: .env nunca estuvo versionado)"
+          echo
+          for i in ghcr.io/rafaaas17/perfil-api:1.0 ghcr.io/rafaaas17/perfil-web:1.0 perfil-db:1.0; do
+            echo "---- docker history --no-trunc $i ----"
+            if docker history --no-trunc --format "{{.CreatedBy}}" "$i" | grep -iE "password|secret|POSTGRES_PASSWORD"; then
+              echo "FALLO: hay una credencial en una capa de $i"
+              exit 1
+            fi
+            echo "sin credenciales en ninguna capa"
+          done
+          echo
+          echo "---- variables grabadas en la imagen de la API ----"
+          docker image inspect ghcr.io/rafaaas17/perfil-api:1.0 --format "{{json .Config.Env}}"
+          echo
+          echo "---- variables grabadas en la imagen de la base de datos ----"
+          docker image inspect perfil-db:1.0 --format "{{json .Config.Env}}"
+
+      # ─────────────────────────── Reto 5 ───────────────────────────
+      - name: "R5 · Trivy sobre la version ingenua"
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.58.0 image --scanners vuln --severity CRITICAL,HIGH \
+            --format table perfil-api:ingenua 2>/dev/null | tail -50
+
+      - name: "R5 · Trivy sobre la imagen final"
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.58.0 image --scanners vuln --severity CRITICAL,HIGH \
+            --format table ghcr.io/rafaaas17/perfil-api:1.0 2>/dev/null | tail -50
+
+      - name: "R5 · Trivy sobre el servidor web y la base de datos"
+        run: |
+          for i in ghcr.io/rafaaas17/perfil-web:1.0 perfil-db:1.0; do
+            echo "======== $i ========"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.58.0 image --scanners vuln --severity CRITICAL,HIGH \
+              --format table "$i" 2>/dev/null | tail -30
+          done
+
+      - name: "R5 · Conteo por severidad"
+        run: |
+          for i in perfil-api:ingenua ghcr.io/rafaaas17/perfil-api:1.0 ghcr.io/rafaaas17/perfil-web:1.0 perfil-db:1.0; do
+            echo "---- $i ----"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.58.0 image --scanners vuln --format json "$i" 2>/dev/null > trivy.json
+            python3 -c "import json,collections; d=json.load(open('trivy.json')); c=collections.Counter(v['Severity'] for r in (d.get('Results') or []) for v in (r.get('Vulnerabilities') or [])); print('  total:', sum(c.values()), ' ', dict(c) if c else '(ninguna)')"
+          done
+
+      - name: "Logs de los servicios"
+        if: always()
+        run: docker compose logs --tail 40

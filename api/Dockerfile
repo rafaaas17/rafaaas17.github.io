@@ -10,9 +10,16 @@
 
 
 # ─────────────────────── Etapa 1: compilar ───────────────────────
-# Regla 1: tag fijo. Regla 2 incluso aquí: la variante alpine del compilador
-# pesa la mitad que la de Debian y se descarga mucho más rápido.
-FROM golang:1.23-alpine3.20 AS build
+# Regla 1: tag fijo, hasta el parche. Regla 2 incluso aquí: la variante alpine
+# del compilador pesa la mitad que la de Debian y se descarga mucho más rápido.
+#
+# Reto 5: la versión del compilador NO se queda en la etapa de build. Go enlaza
+# su biblioteca estándar dentro del binario y graba con qué toolchain se
+# compiló, así que Trivy la lee en la imagen final y reporta las CVE de esa
+# versión de Go. Compilando con 1.23 aparecieron 35 HIGH y 3 CRITICAL de
+# net/http, net/url, crypto/tls, encoding/xml y html/template. Con 1.27.1
+# desaparecen: es el compilador el que las arregla, no el código de la API.
+FROM golang:1.27.1-alpine3.24 AS build
 
 WORKDIR /src
 
@@ -40,7 +47,12 @@ RUN CGO_ENABLED=0 GOOS=linux \
 # whoami" (Reto 3) y hacerse un healthcheck HTTP a sí mismo (Reto 2). Ni
 # scratch ni distroless traen shell ni wget. Alpine cuesta 8 MB y da las dos
 # cosas con busybox.
-FROM alpine:3.20
+# Reto 5: 3.24.2 y no 3.20. En 3.20 quedaban CVE con parche disponible en los
+# paquetes del sistema, entre ellas CVE-2026-40200 en musl (la libc que usa
+# todo lo que corre en esta imagen, incluido el binario estático cuando llama
+# al resolver de DNS) y CVE-2026-22184 en zlib. No hay nada que parchear a
+# mano: la corrección es subir de rama de Alpine.
+FROM alpine:3.24.2
 
 # ca-certificates: si algún día la API habla con un servicio por HTTPS.
 # tzdata: para que las fechas del libro de visitas no salgan siempre en UTC.

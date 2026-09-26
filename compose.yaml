@@ -19,6 +19,11 @@ services:
     # El contenedor escucha en 8080 porque nginx corre sin privilegios (Reto 3).
     ports:
       - "8080:8080"
+    # Reto 4: web solo está en la red frontend. No es que tenga prohibido
+    # hablar con db: es que en su red el nombre "db" no existe y no hay
+    # ninguna ruta hacia él.
+    networks:
+      - frontend
     # Reto 2: no basta con el orden, hay que esperar a que la API esté sana.
     # nginx resuelve "api" al cargar su configuración: si arranca antes de que
     # ese nombre exista, se muere en el arranque.
@@ -45,6 +50,11 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD, copia .env.example a .env}
     expose:
       - "3000"
+    # Reto 4: la API es el único servicio en las dos redes. Es la bisagra:
+    # recibe por frontend y consulta por backend.
+    networks:
+      - frontend
+      - backend
     # Reto 2: esto es lo que "depends_on: [db]" a secas NO hacía. Sin la
     # condición, compose arranca la API en cuanto el contenedor de Postgres
     # existe, que es varios segundos antes de que Postgres acepte conexiones.
@@ -64,10 +74,28 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD, copia .env.example a .env}
     expose:
       - "5432"
+    # Reto 4: la base de datos vive sola con la API.
+    networks:
+      - backend
     volumes:
       # Sin este volumen los mensajes se irían con el contenedor.
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+
+# Reto 4: dos redes, principio de mínimo privilegio.
+#
+# Una red de Docker es un switch virtual con su propio DNS: un servicio solo
+# resuelve los nombres de los servicios conectados a la misma red. Sin esto,
+# compose pone a los tres en una única red por defecto y desde web se puede
+# abrir una conexión a db:5432. Con esto, no hay camino de web a db que no
+# pase por api.
+#
+# "internal: true" en backend deja a la base de datos sin salida a internet:
+# no la necesita para nada y le quita al atacante la mitad del trabajo.
+networks:
+  frontend:
+  backend:
+    internal: true
 
 volumes:
   pgdata:

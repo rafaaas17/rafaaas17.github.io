@@ -1,0 +1,9 @@
+# Lo que no tiene por qué viajar al contexto de build: ni ensucia la imagen
+# ni invalida la caché cuando cambia.
+.git
+.gitignore
+.dockerignore
+Dockerfile
+*.md
+.env
+.env.*

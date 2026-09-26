@@ -1,0 +1,10 @@
+# El repositorio guarda todo en LF y lo entrega en LF también en Windows.
+# Sin esto, git convierte a CRLF al hacer checkout y los archivos que terminan
+# dentro de un contenedor Linux (scripts, nginx.conf, Dockerfiles) llegan con
+# retornos de carro que rompen el shebang y confunden a nginx.
+* text=auto eol=lf
+
+# Binarios: que git no los toque.
+*.png binary
+*.jpg binary
+*.ico binary

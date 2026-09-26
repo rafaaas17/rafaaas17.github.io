@@ -16,8 +16,9 @@ services:
       context: .                  # la raíz: aquí viven index.html y compañía
       dockerfile: web/Dockerfile  # pero el Dockerfile está en web/
     image: ghcr.io/rafaaas17/perfil-web:1.0
+    # El contenedor escucha en 8080 porque nginx corre sin privilegios (Reto 3).
     ports:
-      - "8080:80"
+      - "8080:8080"
     # Reto 2: no basta con el orden, hay que esperar a que la API esté sana.
     # nginx resuelve "api" al cargar su configuración: si arranca antes de que
     # ese nombre exista, se muere en el arranque.

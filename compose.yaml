@@ -18,8 +18,12 @@ services:
     image: ghcr.io/rafaaas17/perfil-web:1.0
     ports:
       - "8080:80"
+    # Reto 2: no basta con el orden, hay que esperar a que la API esté sana.
+    # nginx resuelve "api" al cargar su configuración: si arranca antes de que
+    # ese nombre exista, se muere en el arranque.
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   # La API. "expose" en vez de "ports": el puerto 3000 queda visible para los
@@ -40,8 +44,12 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD, copia .env.example a .env}
     expose:
       - "3000"
+    # Reto 2: esto es lo que "depends_on: [db]" a secas NO hacía. Sin la
+    # condición, compose arranca la API en cuanto el contenedor de Postgres
+    # existe, que es varios segundos antes de que Postgres acepte conexiones.
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   # La base de datos. Tampoco publica puerto.

@@ -29,7 +29,10 @@
 # /var/run/nginx.pid y en las cachés siendo ya nginx), o darle
 # CAP_NET_BIND_SERVICE para que un no-root abra el 80 (funciona, pero es
 # devolverle un privilegio para conservar un número de puerto que no importa).
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+# Reto 5: rama mainline (1.31) sobre Alpine 3.24 y tag fijo hasta el parche.
+# La 1.27 sobre Alpine 3.20 arrastraba las mismas CVE de musl, zlib, libxml2 y
+# nghttp2 que la API, más las del propio nginx.
+FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24
 
 # Regla 3: primero la configuración, que casi nunca cambia; después el sitio,
 # que cambia en cada commit. Así editar el perfil no invalida la capa de nginx.

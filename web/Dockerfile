@@ -21,5 +21,8 @@ COPY index.html estilos.css libro-de-visitas.js /usr/share/nginx/html/
 # Regla 6: nada de credenciales. Este contenedor no tiene ninguna que guardar.
 EXPOSE 80
 
+# Reto 2: wget de busybox contra el /healthz que define nginx.conf.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3     CMD wget -q -O /dev/null http://127.0.0.1:80/healthz || exit 1
+
 # La imagen oficial ya trae su ENTRYPOINT y arranca nginx en primer plano
 # (regla 4: un proceso por contenedor, y que sea el PID 1 el que reciba SIGTERM).

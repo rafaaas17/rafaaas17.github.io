@@ -9,9 +9,27 @@
 # en compose.yaml el contexto es "." y el Dockerfile se indica aparte con
 # "dockerfile: web/Dockerfile". Por eso las rutas de abajo se leen desde la raíz.
 
-# Regla 1 y 2: tag fijo y base pequeña (alpine, ~50 MB frente a ~190 MB de la
-# variante Debian).
-FROM nginx:1.27-alpine
+# Regla 1 y 2: tag fijo y base pequeña (alpine).
+#
+# Regla 5 / Reto 3: nginxinc/nginx-unprivileged en vez de la imagen oficial.
+#
+# La imagen oficial de nginx arranca como root y necesita serlo por una razón
+# concreta: su proceso maestro abre el puerto 80, y en Linux los puertos por
+# debajo de 1024 están reservados a root o a quien tenga CAP_NET_BIND_SERVICE.
+# Recién después de abrirlo baja de privilegios y deja a los workers como
+# usuario nginx. El resultado es que el PID 1 del contenedor sigue siendo root.
+#
+# Esta variante, mantenida por el mismo equipo de nginx, escucha en 8080 en vez
+# de 80 y por eso puede correr entera como el usuario nginx (UID 101). Dentro
+# de un contenedor el número de puerto da igual: quien decide en qué puerto se
+# ve la aplicación es la publicación de compose ("8080:8080").
+#
+# Las alternativas que descarté: quedarme con la oficial y pasarle
+# "user: 101" en compose (rompe, porque el entrypoint escribe en
+# /var/run/nginx.pid y en las cachés siendo ya nginx), o darle
+# CAP_NET_BIND_SERVICE para que un no-root abra el 80 (funciona, pero es
+# devolverle un privilegio para conservar un número de puerto que no importa).
+FROM nginxinc/nginx-unprivileged:1.27-alpine
 
 # Regla 3: primero la configuración, que casi nunca cambia; después el sitio,
 # que cambia en cada commit. Así editar el perfil no invalida la capa de nginx.
@@ -19,10 +37,11 @@ COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY index.html estilos.css libro-de-visitas.js /usr/share/nginx/html/
 
 # Regla 6: nada de credenciales. Este contenedor no tiene ninguna que guardar.
-EXPOSE 80
+EXPOSE 8080
 
 # Reto 2: wget de busybox contra el /healthz que define nginx.conf.
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3     CMD wget -q -O /dev/null http://127.0.0.1:80/healthz || exit 1
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
 
 # La imagen oficial ya trae su ENTRYPOINT y arranca nginx en primer plano
 # (regla 4: un proceso por contenedor, y que sea el PID 1 el que reciba SIGTERM).

@@ -57,9 +57,31 @@
         <li>Correo: <a href="mailto:202220909@urp.edu.pe">202220909@urp.edu.pe</a></li>
       </ul>
     </section>
+
+    <!-- Libro de visitas (LAB-02). Arranca oculto: libro-de-visitas.js lo muestra
+         solo si la API responde. En GitHub Pages no hay backend, así que esta
+         sección simplemente no aparece y el resto del perfil se ve igual. -->
+    <section id="libro-de-visitas" hidden>
+      <h2>Libro de visitas</h2>
+      <p>¿Pasaste por aquí? Déjame un mensaje.</p>
+
+      <form id="form-mensaje">
+        <label>Tu nombre
+          <input name="nombre" maxlength="60" required>
+        </label>
+        <label>Tu mensaje
+          <textarea name="mensaje" maxlength="280" rows="3" required></textarea>
+        </label>
+        <button type="submit">Dejar mensaje</button>
+        <p id="form-estado" role="status"></p>
+      </form>
+
+      <ul id="lista-mensajes"></ul>
+    </section>
   </main>
   <footer>
     <p>Hecho con Git y GitHub Pages · IF-1116 · 2026-II</p>
   </footer>
+  <script src="libro-de-visitas.js" defer></script>
 </body>
 </html>

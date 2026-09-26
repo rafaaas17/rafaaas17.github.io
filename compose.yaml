@@ -1,0 +1,64 @@
+# Los tres servicios del perfil: web, api y db.
+#
+# Arranque en local:
+#   cp .env.example .env     (una sola vez; edita la contraseña)
+#   docker compose up -d --build
+#   http://localhost:8080
+#
+# En Codespaces no hace falta nada de esto: .devcontainer/ lo hace solo.
+
+name: perfil
+
+services:
+  # El único servicio que publica un puerto hacia tu máquina.
+  web:
+    build:
+      context: .                  # la raíz: aquí viven index.html y compañía
+      dockerfile: web/Dockerfile  # pero el Dockerfile está en web/
+    image: ghcr.io/rafaaas17/perfil-web:1.0
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # La API. "expose" en vez de "ports": el puerto 3000 queda visible para los
+  # demás contenedores, pero no se publica hacia el host. A la API solo se
+  # llega pasando por nginx.
+  api:
+    build:
+      context: ./api
+    image: ghcr.io/rafaaas17/perfil-api:1.0
+    environment:
+      PORT: "3000"
+      DB_HOST: db
+      DB_PORT: "5432"
+      # Los ":?" hacen que compose se niegue a arrancar con un mensaje claro
+      # si falta el .env, en vez de levantar una base de datos sin contraseña.
+      DB_NAME: ${POSTGRES_DB:?falta POSTGRES_DB, copia .env.example a .env}
+      DB_USER: ${POSTGRES_USER:?falta POSTGRES_USER, copia .env.example a .env}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD, copia .env.example a .env}
+    expose:
+      - "3000"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  # La base de datos. Tampoco publica puerto.
+  db:
+    build:
+      context: ./db
+    image: perfil-db:1.0
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?falta POSTGRES_DB, copia .env.example a .env}
+      POSTGRES_USER: ${POSTGRES_USER:?falta POSTGRES_USER, copia .env.example a .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD, copia .env.example a .env}
+    expose:
+      - "5432"
+    volumes:
+      # Sin este volumen los mensajes se irían con el contenedor.
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:

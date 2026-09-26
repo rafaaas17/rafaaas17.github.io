@@ -18,7 +18,14 @@
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "moby": true,
       "dockerDashComposeVersion": "v2"
-    }
+    },
+
+    // Sin servidor SSH, "gh codespace ssh" y "gh codespace logs" no pueden
+    // entrar, y la única forma de comprobar que el Codespace arrancó bien es
+    // abrirlo en el navegador y mirar. Con esto la verificación del B3 se
+    // puede hacer desde la terminal, y VS Code de escritorio también puede
+    // conectarse.
+    "ghcr.io/devcontainers/features/sshd:1": {}
   },
 
   // postCreateCommand corre UNA sola vez, al crear el Codespace. Aquí se

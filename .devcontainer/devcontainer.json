@@ -1,0 +1,57 @@
+// Entorno de desarrollo reproducible para GitHub Codespaces.
+//
+// Objetivo del B3: quien abra un Codespace nuevo de este repositorio no escribe
+// ni un comando. Cuando el entorno termina de cargar, los tres servicios están
+// corriendo y la vista previa del perfil se abre sola.
+//
+// Este archivo admite comentarios: es JSONC, no JSON estricto.
+{
+  "name": "Perfil con libro de visitas (LAB-02)",
+
+  // Imagen base con tag fijo, igual que en los Dockerfiles. "latest" haría que
+  // el entorno dejara de ser reproducible el día que Microsoft la mueva.
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+
+  "features": {
+    // El devcontainer es él mismo un contenedor: sin esto no hay daemon de
+    // Docker dentro y "docker compose" no existe.
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true,
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+
+  // postCreateCommand corre UNA sola vez, al crear el Codespace. Aquí se
+  // genera el .env, que no está en el repositorio (Reto 6).
+  "postCreateCommand": "bash .devcontainer/preparar-entorno.sh",
+
+  // postStartCommand corre en CADA arranque, también cuando el Codespace se
+  // reanuda después de estar detenido. Levantar la aplicación va aquí: si
+  // estuviera en postCreateCommand, al reanudar el Codespace no arrancaría.
+  "postStartCommand": "bash .devcontainer/levantar.sh",
+
+  // Sin esto, VS Code da el entorno por listo en cuanto termina de crearse y
+  // abre la vista previa antes de que la aplicación responda.
+  "waitFor": "postStartCommand",
+
+  // 8080 es el único puerto publicado: el de nginx.
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": {
+      "label": "Perfil (web)",
+      // Abre la vista previa sola en cuanto el puerto aparece.
+      "onAutoForward": "openPreview"
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  },
+
+  // Usuario sin privilegios también aquí, no solo en los servicios.
+  "remoteUser": "vscode"
+}

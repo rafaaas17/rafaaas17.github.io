@@ -99,12 +99,20 @@ jobs:
           docker compose ps --format "table {{.Service}}\t{{.Ports}}"
 
       # ─────────────────────────── Reto 1 ───────────────────────────
+      # Se reconstruye la carpeta api/ ENTERA de aquel commit, no solo su
+      # Dockerfile. Tomándolo suelto fallaba: aquel Dockerfile compila con
+      # golang:1.23-bookworm y el go.mod de hoy exige Go 1.26, así que
+      # "go mod download" se negaba. El "antes" honesto es el código de
+      # entonces con el compilador de entonces.
       - name: "R1 · Construir la version ingenua (una sola etapa)"
         run: |
-          git show "$DOCKERFILE_INGENUO:api/Dockerfile" > api/Dockerfile.ingenuo
+          rm -rf api-ingenua && mkdir -p api-ingenua
+          git archive "$DOCKERFILE_INGENUO" api | tar -x -C api-ingenua --strip-components=1
           echo "---- Dockerfile ingenuo ----"
-          cat api/Dockerfile.ingenuo
-          docker build -q -f api/Dockerfile.ingenuo -t perfil-api:ingenua ./api
+          cat api-ingenua/Dockerfile
+          echo "---- go.mod de entonces ----"
+          cat api-ingenua/go.mod
+          docker build -q -t perfil-api:ingenua ./api-ingenua
 
       - name: "R1 · Tabla antes / despues"
         run: |

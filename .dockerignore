@@ -1,0 +1,15 @@
+# El contexto de build de "web" es la raíz del repositorio, así que conviene
+# no mandarle al daemon nada que no vaya a servir nginx.
+.git
+.gitignore
+.gitattributes
+.github
+.devcontainer
+.claude
+api/
+db/
+web/Dockerfile
+compose.yaml
+*.md
+.env
+.env.*

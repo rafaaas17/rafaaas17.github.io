@@ -56,6 +56,10 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.VERSION_NODE }}
+          # Reto 1: guarda ~/.npm entre runs, con package-lock.json como
+          # clave. "npm ci" sigue instalando desde cero en node_modules,
+          # pero ya no vuelve a descargar los paquetes de la red.
+          cache: npm
 
       - name: Instalar dependencias de desarrollo
         run: npm ci
@@ -76,6 +80,9 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: api/go.mod
+          # Reto 1: caché de los módulos descargados y de la caché de
+          # compilación de Go, con go.sum como clave.
+          cache-dependency-path: api/go.sum
 
       # Linter 3 de 3: el código de la API. gofmt es formato y go vet busca
       # errores que compilan pero no hacen lo que uno cree.
@@ -122,6 +129,10 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.VERSION_NODE }}
+          # Reto 1: guarda ~/.npm entre runs, con package-lock.json como
+          # clave. "npm ci" sigue instalando desde cero en node_modules,
+          # pero ya no vuelve a descargar los paquetes de la red.
+          cache: npm
 
       - name: Instalar dependencias de desarrollo
         run: npm ci
@@ -148,6 +159,9 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: api/go.mod
+          # Reto 1: caché de los módulos descargados y de la caché de
+          # compilación de Go, con go.sum como clave.
+          cache-dependency-path: api/go.sum
 
       - name: Pruebas de la API (go test)
         working-directory: api
@@ -215,6 +229,11 @@ jobs:
           # org.opencontainers.image.source sale de aquí: es la etiqueta que
           # conecta el paquete con este repositorio en la pestaña Packages.
           labels: ${{ steps.meta-web.outputs.labels }}
+          # Reto 1: las capas viajan a la caché de Actions. La etapa que
+          # compila Go es la cara, y entre dos commits que no tocan go.mod
+          # se reutiliza entera.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Calcular tags y etiquetas de perfil-api
         id: meta-api
@@ -230,6 +249,11 @@ jobs:
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}
+          # Reto 1: las capas viajan a la caché de Actions. La etapa que
+          # compila Go es la cara, y entre dos commits que no tocan go.mod
+          # se reutiliza entera.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # ───────────────────────────── 5. SECURITY ──────────────────────────────
   # Trivy no reconstruye nada: baja del registro la imagen que acaba de
@@ -260,6 +284,9 @@ jobs:
           ignore-unfixed: true
           format: table
           exit-code: "1"
+          # Reto 1: la base de vulnerabilidades pesa y se actualiza cada 6
+          # horas; no hace falta bajarla dos veces en el mismo run.
+          cache: "true"
 
       - name: Trivy sobre perfil-api
         # Aunque la anterior falle, quiero ver también esta: dos problemas se
@@ -273,6 +300,9 @@ jobs:
           ignore-unfixed: true
           format: table
           exit-code: "1"
+          # Reto 1: la base de vulnerabilidades pesa y se actualiza cada 6
+          # horas; no hace falta bajarla dos veces en el mismo run.
+          cache: "true"
 
   # ─────────────────────────────── 7. SMOKE ───────────────────────────────
   # Sin ambiente DEV, el humo se prueba en el propio runner: se levanta la

@@ -52,8 +52,10 @@ COPY ${SITIO}/index.html ${SITIO}/estilos.css ${SITIO}/libro-de-visitas.js /usr/
 EXPOSE 8080
 
 # Reto 2: wget de busybox contra el /healthz que define nginx.conf.
+# Forma JSON (DL3025): sin ella Docker envuelve el comando en un shell
+# implícito. Aquí el shell se nombra, porque hace falta para el "||".
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+    CMD ["sh", "-c", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
 
 # La imagen oficial ya trae su ENTRYPOINT y arranca nginx en primer plano
 # (regla 4: un proceso por contenedor, y que sea el PID 1 el que reciba SIGTERM).

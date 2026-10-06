@@ -30,6 +30,7 @@ USER postgres
 # daría la base por lista mientras todavía se están creando las tablas.
 # Forzando TCP, el chequeo solo pasa cuando arranca el servidor de verdad.
 #
-# Forma shell para que $POSTGRES_USER y $POSTGRES_DB se expandan al ejecutarse.
+# Forma JSON (DL3025) con el shell nombrado: $POSTGRES_USER y $POSTGRES_DB
+# tienen que expandirse al ejecutarse, y hace falta el "||".
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=12 \
-    CMD pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" || exit 1
+    CMD ["sh", "-c", "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" || exit 1"]

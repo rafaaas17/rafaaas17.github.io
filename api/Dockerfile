@@ -90,8 +90,10 @@ EXPOSE 3000
 # Forma shell (sin corchetes) a propósito: así ${PORT} se expande en tiempo de
 # ejecución y el chequeo sigue al puerto que realmente esté escuchando.
 # wget es el de busybox, que ya viene en alpine: no hace falta instalar curl.
+# Forma JSON (DL3025). El shell se nombra explícitamente porque esta línea
+# necesita expandir ${PORT:-3000} y encadenar con "||".
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
-    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-3000}/api/health" || exit 1
+    CMD ["sh", "-c", "wget -q -O /dev/null \"http://127.0.0.1:${PORT:-3000}/api/health\" || exit 1"]
 
 # Regla 4: un proceso, en forma exec, para que sea PID 1 y reciba SIGTERM.
 ENTRYPOINT ["/usr/local/bin/api"]

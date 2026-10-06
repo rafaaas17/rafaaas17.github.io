@@ -12,6 +12,15 @@
 #
 # Este archivo reemplaza a publicar-imagenes.yml y a sin-secretos.yml, que
 # hacían por su cuenta lo que ahora son los jobs package y build.
+#
+# Reto 4: todas las acciones están fijadas por el SHA completo del commit, con
+# el número de versión al lado como comentario. Un tag de Git se puede mover:
+# quien controle el repositorio de la acción puede reapuntar v4 a otro commit,
+# y mi pipeline ejecutaría código nuevo sin que yo cambie una línea. Fue lo
+# que pasó en marzo de 2025 con tj-actions/changed-files. Un SHA no se mueve.
+# Para que esto no se convierta en acciones viejas y abandonadas, Dependabot
+# (.github/dependabot.yml) abre un PR cuando sale una versión nueva, y ese PR
+# pasa por este mismo pipeline.
 name: CI/CD
 
 on:
@@ -41,7 +50,7 @@ jobs:
       contents: read
     steps:
       - name: Clonar el repositorio
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # El control de credenciales mira todo el historial, no solo el
           # último commit.
@@ -53,7 +62,7 @@ jobs:
         run: bash scripts/sin-credenciales.sh
 
       - name: Preparar Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.VERSION_NODE }}
           # Reto 1: guarda ~/.npm entre runs, con package-lock.json como
@@ -77,7 +86,7 @@ jobs:
           echo "OK: los tres Dockerfile pasan Hadolint."
 
       - name: Preparar Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: api/go.mod
           # Reto 1: caché de los módulos descargados y de la caché de
@@ -110,7 +119,7 @@ jobs:
       # publicar: ya no se publica la rama entera, y por eso compose.yaml,
       # api/ y db/ dejan de estar en Internet.
       - name: Subir el artefacto de Pages
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: _site
 
@@ -123,10 +132,10 @@ jobs:
       actions: read
     steps:
       - name: Clonar el repositorio
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Preparar Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.VERSION_NODE }}
           # Reto 1: guarda ~/.npm entre runs, con package-lock.json como
@@ -141,7 +150,7 @@ jobs:
       # Lo que prueba Vitest son exactamente los bytes que va a publicar
       # deploy-prod, no una carpeta parecida.
       - name: Bajar el artefacto de Pages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: github-pages
           path: artefacto
@@ -156,7 +165,7 @@ jobs:
         run: npm test
 
       - name: Preparar Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: api/go.mod
           # Reto 1: caché de los módulos descargados y de la caché de
@@ -183,10 +192,10 @@ jobs:
       etiqueta: ${{ steps.meta-web.outputs.version }}
     steps:
       - name: Clonar el repositorio
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Bajar el artefacto de Pages
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: github-pages
           path: artefacto
@@ -198,12 +207,12 @@ jobs:
           tar -xf artefacto/artifact.tar -C _site
 
       - name: Preparar Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # GITHUB_TOKEN, no un token personal: dura lo que dura el job y solo
       # puede escribir en los paquetes de este repositorio.
       - name: Entrar en GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -211,13 +220,13 @@ jobs:
 
       - name: Calcular tags y etiquetas de perfil-web
         id: meta-web
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGEN_WEB }}
           tags: type=sha,format=short,prefix=sha-
 
       - name: Construir y publicar perfil-web
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: web/Dockerfile
@@ -237,13 +246,13 @@ jobs:
 
       - name: Calcular tags y etiquetas de perfil-api
         id: meta-api
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGEN_API }}
           tags: type=sha,format=short,prefix=sha-
 
       - name: Construir y publicar perfil-api
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./api
           push: true
@@ -270,10 +279,10 @@ jobs:
       # Hace falta el código en disco: Semgrep analiza lo que escribí yo, no
       # la imagen, y Trivy lee .trivyignore desde la raíz del repositorio.
       - name: Clonar el repositorio
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Entrar en GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -302,7 +311,7 @@ jobs:
 
       - name: Publicar los hallazgos de Semgrep
         if: ${{ !cancelled() }}
-        uses: github/codeql-action/upload-sarif@v4.38.2
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: semgrep.sarif
           category: semgrep
@@ -328,7 +337,7 @@ jobs:
       # de más abajo, que sí detienen el pipeline.
       - name: Informe SARIF de Trivy (perfil-web)
         if: ${{ !cancelled() }}
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln
@@ -345,14 +354,14 @@ jobs:
 
       - name: Publicar los hallazgos de Trivy (perfil-web)
         if: ${{ !cancelled() }}
-        uses: github/codeql-action/upload-sarif@v4.38.2
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: trivy-web.sarif
           category: trivy-perfil-web
 
       - name: Informe SARIF de Trivy (perfil-api)
         if: ${{ !cancelled() }}
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGEN_API }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln
@@ -369,7 +378,7 @@ jobs:
 
       - name: Publicar los hallazgos de Trivy (perfil-api)
         if: ${{ !cancelled() }}
-        uses: github/codeql-action/upload-sarif@v4.38.2
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           sarif_file: trivy-api.sarif
           category: trivy-perfil-api
@@ -378,7 +387,7 @@ jobs:
       # nadie hoy, y frenar el pipeline por ella solo enseña a ignorarlo.
       # Si tiene corrección, es trabajo pendiente y el pipeline se detiene.
       - name: Trivy sobre perfil-web
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln
@@ -395,7 +404,7 @@ jobs:
         # Aunque la anterior falle, quiero ver también esta: dos problemas se
         # arreglan en un viaje, no en dos.
         if: ${{ !cancelled() }}
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGEN_API }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln
@@ -419,7 +428,7 @@ jobs:
       packages: read
     steps:
       - name: Entrar en GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -474,4 +483,4 @@ jobs:
     steps:
       - name: Publicar el artefacto en GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

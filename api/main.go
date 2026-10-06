@@ -57,6 +57,32 @@ func main() {
 	}
 	db.SetMaxOpenConns(5)
 
+	servidor := &http.Server{Addr: ":" + env("PORT", "3000"), Handler: nuevoMux(db), ReadHeaderTimeout: 5 * time.Second}
+
+	// Sin esto, "docker stop" tarda 10 segundos: el proceso ignora la señal de apagado.
+	go func() {
+		senal := make(chan os.Signal, 1)
+		signal.Notify(senal, syscall.SIGINT, syscall.SIGTERM)
+		log.Printf("Señal %v: cerrando", <-senal)
+		ctx, cancelar := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelar()
+		servidor.Shutdown(ctx)
+	}()
+
+	log.Printf("API escuchando en el puerto %s", env("PORT", "3000"))
+	if err := servidor.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+	db.Close()
+}
+
+// nuevoMux arma las rutas de la API.
+//
+// Está separado de main() para que las pruebas (main_test.go) puedan pedirle
+// el enrutador y hacerle peticiones con httptest, sin abrir un puerto ni
+// levantar Postgres. Antes todo esto vivía dentro de main(), que es justo lo
+// único que una prueba no puede llamar.
+func nuevoMux(db *sql.DB) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -126,21 +152,5 @@ func main() {
 		responder(w, http.StatusCreated, m)
 	})
 
-	servidor := &http.Server{Addr: ":" + env("PORT", "3000"), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-
-	// Sin esto, "docker stop" tarda 10 segundos: el proceso ignora la señal de apagado.
-	go func() {
-		senal := make(chan os.Signal, 1)
-		signal.Notify(senal, syscall.SIGINT, syscall.SIGTERM)
-		log.Printf("Señal %v: cerrando", <-senal)
-		ctx, cancelar := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancelar()
-		servidor.Shutdown(ctx)
-	}()
-
-	log.Printf("API escuchando en el puerto %s", env("PORT", "3000"))
-	if err := servidor.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
-	}
-	db.Close()
+	return mux
 }

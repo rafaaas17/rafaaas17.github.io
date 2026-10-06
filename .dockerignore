@@ -2,6 +2,11 @@
 # no mandarle al daemon nada que no vaya a servir nginx.
 .git
 .gitignore
+node_modules/
+tests/
+scripts/
+package.json
+package-lock.json
 .gitattributes
 .github
 .devcontainer

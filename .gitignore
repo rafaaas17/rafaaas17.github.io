@@ -1,6 +1,14 @@
-# Archivos del sistema operativo
 .DS_Store
 Thumbs.db
-
-# Variables de entorno y credenciales
 .env
+
+# Dependencias de las pruebas: se reinstalan con "npm ci" desde
+# package-lock.json, que sí se versiona.
+node_modules/
+
+# El sitio armado: es un resultado del build, no una fuente.
+_site/
+
+# Informes de los escáneres.
+*.sarif
+trivy.json

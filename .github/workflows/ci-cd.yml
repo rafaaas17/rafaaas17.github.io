@@ -252,7 +252,7 @@ jobs:
       # nadie hoy, y frenar el pipeline por ella solo enseña a ignorarlo.
       # Si tiene corrección, es trabajo pendiente y el pipeline se detiene.
       - name: Trivy sobre perfil-web
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln
@@ -265,7 +265,7 @@ jobs:
         # Aunque la anterior falle, quiero ver también esta: dos problemas se
         # arreglan en un viaje, no en dos.
         if: ${{ !cancelled() }}
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGEN_API }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln

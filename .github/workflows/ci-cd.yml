@@ -417,6 +417,49 @@ jobs:
           # horas; no hace falta bajarla dos veces en el mismo run.
           cache: "true"
 
+  # ───────────────────────── 6. INTEGRACIÓN ──────────────────────────
+  # Reto 3. Vitest prueba el sitio estático y "go test" prueba la API con una
+  # base inalcanzable. Falta la pregunta que ninguna de las dos responde: ¿los
+  # tres contenedores juntos hacen lo que dicen? Aquí se levanta la aplicación
+  # completa con Compose y se prueba el contrato de la API DESDE FUERA,
+  # pasando por nginx, que es como la ve el navegador del visitante.
+  #
+  # Depende de security, igual que smoke, y ninguna de las dos depende de la
+  # otra: corren en paralelo (Reto 1) sin saltarse ninguna compuerta.
+  integracion:
+    needs: security
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # El runner no tiene mi .env, y compose se niega a arrancar sin él
+      # (${POSTGRES_PASSWORD:?...}). Se genera uno con una contraseña
+      # aleatoria, con el mismo script que usa el Codespace: la credencial
+      # nace y muere dentro del job, y no hay ningún secreto que guardar.
+      - name: Generar el .env del runner
+        run: bash .devcontainer/preparar-entorno.sh
+
+      - name: Levantar los tres servicios
+        run: docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Estado de los servicios
+        run: docker compose ps
+
+      - name: Probar el contrato de la API
+        run: bash scripts/pruebas-integracion.sh http://localhost:8080
+
+      # Solo cuando algo falla: en verde, 80 líneas de logs son ruido.
+      - name: Logs de los contenedores si algo falló
+        if: failure()
+        run: docker compose logs --tail 80
+
+      - name: Apagar y borrar el volumen
+        if: always()
+        run: docker compose down -v
+
   # ─────────────────────────────── 7. SMOKE ───────────────────────────────
   # Sin ambiente DEV, el humo se prueba en el propio runner: se levanta la
   # imagen ya escaneada y se le hacen dos preguntas. Tiene que durar segundos.
@@ -466,7 +509,7 @@ jobs:
   # Producción es GitHub Pages. Solo se despliega desde main: un pull request
   # pasa por todas las compuertas pero nunca publica.
   deploy-prod:
-    needs: smoke
+    needs: [smoke, integracion]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:

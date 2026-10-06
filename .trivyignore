@@ -1,13 +1,29 @@
 # Vulnerabilidades aceptadas a conciencia (Reto 2 del LAB-03).
 #
-# Aceptar una vulnerabilidad es una decisión, no un atajo. Vale la pena
-# cuando el riesgo real en ESTE sistema es nulo o muy bajo y escribirlo deja
-# constancia de por qué; es esconder el problema cuando se hace para que el
-# pipeline deje de molestar. La diferencia práctica: si no puedo explicar la
-# línea en voz alta, no va aquí, se arregla.
+# Aceptar una vulnerabilidad es una decisión, no un atajo. Vale la pena cuando
+# el riesgo real en ESTE sistema es bajo y la corrección no está en mis manos;
+# es esconder el problema cuando se hace para que el pipeline deje de molestar.
+# La diferencia práctica: si no puedo explicar la línea en voz alta, no va
+# aquí, se arregla.
 #
-# Cada entrada lleva: el CVE, en qué imagen y paquete está, por qué se acepta
-# y hasta cuándo. Las entradas sin fecha no existen: una excepción eterna es
-# una excepción que nadie va a volver a mirar.
+# Cada entrada lleva qué es, dónde está, por qué se acepta y cuándo se vuelve
+# a mirar. Una excepción sin fecha es una excepción que nadie va a revisar.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CVE-2025-68121 — CRITICAL — paquete: stdlib de Go v1.24.6
+# Imagen:   perfil-db (postgres:16.15-alpine3.24)
+# Revisar:  2026-11-06, o antes si sale un tag nuevo de postgres:16-alpine
 #
-# Formato: un identificador por línea.
+# No está en mi código ni en una librería que yo elija: está en un binario
+# auxiliar que la imagen oficial de PostgreSQL trae compilado con Go 1.24.6.
+# Trivy dice que se corrige en Go 1.24.13, pero esa corrección la aplica quien
+# publica la imagen, recompilándola; desde mi Dockerfile no puedo cambiar la
+# versión de Go de un binario que viene ya compilado. Las dos salidas reales
+# son esperar el tag nuevo (lo vigila Dependabot) o cambiar de imagen base, que
+# para una base de datos es un precio muy alto por una CVE que, además, no está
+# expuesta: el contenedor db no publica ningún puerto, vive en una red marcada
+# como "internal" y solo lo alcanza la API.
+#
+# Las imágenes que sí se publican, perfil-web y perfil-api, están en cero: esta
+# excepción no las cubre ni las afecta.
+CVE-2025-68121

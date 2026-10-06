@@ -508,6 +508,24 @@ jobs:
       - name: Probar el contrato de la API
         run: bash scripts/pruebas-integracion.sh http://localhost:8080
 
+      # La tercera imagen. perfil-web y perfil-api se escanean en el job
+      # security, donde ya están publicadas en el registro; la de la base de
+      # datos no se publica y solo existe cuando se levanta la aplicación, así
+      # que se escanea aquí, que es donde está construida. Misma regla que las
+      # otras dos: CRITICAL con corrección disponible detiene el pipeline.
+      - name: Trivy sobre la imagen de la base de datos
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: perfil-db:1.0
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+          trivyignores: .trivyignore
+          cache: "true"
+
       # Solo cuando algo falla: en verde, 80 líneas de logs son ruido.
       - name: Logs de los contenedores si algo falló
         if: failure()

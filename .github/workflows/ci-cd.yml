@@ -162,7 +162,7 @@ jobs:
           find _site -type f | sort
 
       - name: Pruebas del sitio (Vitest)
-        run: npm test
+        run: npm test -- --reporter=default --reporter=json --outputFile.json=vitest.json
 
       - name: Preparar Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -174,7 +174,20 @@ jobs:
 
       - name: Pruebas de la API (go test)
         working-directory: api
-        run: go test ./... -v
+        run: |
+          # -json para poder contar las pruebas en el resumen del run, y jq
+          # para que el log siga siendo legible. Con pipefail, si go test
+          # falla, el paso falla: sin eso mandaría el código de salida de jq.
+          set -o pipefail
+          go test ./... -json | tee ../go-test.json \
+            | jq -r 'select(.Test != null and (.Action == "pass" or .Action == "fail")) | "\(.Action | ascii_upcase)  \(.Test)"'
+
+      # Reto 6: quien aprueba el despliegue no va a abrir seis logs. Esto deja
+      # el conteo de pruebas en la pantalla del run, y el detalle solo de las
+      # que fallaron.
+      - name: Resumen de las pruebas
+        if: ${{ !cancelled() }}
+        run: bash scripts/resumen-pruebas.sh vitest.json go-test.json
 
   # ────────────────────────────── 4. PACKAGE ──────────────────────────────
   # Las imágenes se publican en GitHub Packages con el SHA del commit como
@@ -329,7 +342,7 @@ jobs:
           fi
           echo "OK: ningún hallazgo de nivel error."
 
-      # ───────── Informes de Trivy hacia Code scanning (Reto 2) ─────────
+      # ───────── Informes de Trivy (Retos 2 y 6) ─────────
       #
       # Estos pasos no son la compuerta: generan el informe en SARIF con
       # CRITICAL y HIGH para que los hallazgos queden en Security → Code
@@ -382,6 +395,50 @@ jobs:
         with:
           sarif_file: trivy-api.sarif
           category: trivy-perfil-api
+
+      # Reto 6: el mismo escaneo, en JSON, resumido por severidad en la
+      # pantalla del run con el script del LAB-02.
+      - name: Informe JSON de Trivy (perfil-web)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}
+          scanners: vuln
+          format: json
+          output: trivy-web.json
+          trivyignores: .trivyignore
+          cache: "true"
+
+      - name: Informe JSON de Trivy (perfil-api)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGEN_API }}:${{ needs.package.outputs.etiqueta }}
+          scanners: vuln
+          format: json
+          output: trivy-api.json
+          trivyignores: .trivyignore
+          cache: "true"
+
+      - name: Resumen de vulnerabilidades
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "## 🛡️ Vulnerabilidades (Trivy)"
+            echo
+            echo "Compuerta: el pipeline se detiene ante una CRITICAL con corrección disponible."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          python3 .github/scripts/resumen-trivy.py trivy-web.json --markdown "perfil-web:${{ needs.package.outputs.etiqueta }}" >> "$GITHUB_STEP_SUMMARY"
+          python3 .github/scripts/resumen-trivy.py trivy-api.json --markdown "perfil-api:${{ needs.package.outputs.etiqueta }}" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### 🔍 SAST (Semgrep)"
+            echo
+            echo "Hallazgos de nivel error: $(jq '[.runs[].results[]? | select(.level == \"error\")] | length' semgrep.sarif)"
+            echo "Hallazgos en total: $(jq '[.runs[].results[]?] | length' semgrep.sarif)"
+            echo
+            echo "El detalle está en Security → Code scanning."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # --ignore-unfixed: una CRITICAL sin parche disponible no la arregla
       # nadie hoy, y frenar el pipeline por ella solo enseña a ignorarlo.
@@ -501,6 +558,12 @@ jobs:
           echo "OK: la página responde y dice mi nombre."
           curl -fsS -o /dev/null -w "healthz: HTTP %{http_code}\n" http://localhost:8080/healthz
 
+      - name: Resumen del smoke
+        if: ${{ !cancelled() }}
+        run: |
+          echo "## 💨 Smoke" >> "$GITHUB_STEP_SUMMARY"
+          echo "Imagen probada: \`${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}\` (la misma que escaneó Trivy)." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Logs del contenedor si algo falló
         if: failure()
         run: docker logs smoke
@@ -540,3 +603,14 @@ jobs:
       # de Pages tarda unos segundos en servir la versión nueva.
       - name: Revisar el sitio publicado
         run: bash scripts/verificar-produccion.sh "${{ steps.deployment.outputs.page_url }}"
+
+      - name: Resumen del despliegue
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "## 🚀 Producción"
+            echo
+            echo "- URL: ${{ steps.deployment.outputs.page_url }}"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- Imágenes: \`${{ needs.package.outputs.etiqueta }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

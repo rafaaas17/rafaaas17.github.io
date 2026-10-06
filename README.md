@@ -1,5 +1,7 @@
 # Perfil — Rafael Alarcón Romero
 
+[![CI/CD](https://github.com/rafaaas17/rafaaas17.github.io/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/rafaaas17/rafaaas17.github.io/actions/workflows/ci-cd.yml)
+
 Sitio personal publicado en **https://rafaaas17.github.io**
 
 Desde el LAB-02 el perfil tiene además un **libro de visitas**, y para eso el

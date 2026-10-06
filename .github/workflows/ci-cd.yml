@@ -264,13 +264,99 @@ jobs:
     permissions:
       contents: read
       packages: read
+      # Reto 2: para publicar los informes SARIF en Security → Code scanning.
+      security-events: write
     steps:
+      # Hace falta el código en disco: Semgrep analiza lo que escribí yo, no
+      # la imagen, y Trivy lee .trivyignore desde la raíz del repositorio.
+      - name: Clonar el repositorio
+        uses: actions/checkout@v7
+
       - name: Entrar en GHCR
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ───────────── SAST: lo que escribo yo (Reto 2) ─────────────
+      #
+      # Trivy mira lo que hereda: el sistema operativo de la imagen y las
+      # librerías de terceros. Eso es SCA y escaneo de imagen. Semgrep mira
+      # otra cosa: mi propio código, buscando patrones peligrosos (SQL
+      # concatenado, innerHTML con datos del usuario, credenciales escritas).
+      # Son preguntas distintas y por eso corren las dos.
+      - name: Semgrep sobre la API y el JavaScript
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp             -v "$PWD:/src" -w /src semgrep/semgrep:1.179.0             semgrep scan --config p/golang --config p/javascript --config p/secrets             --sarif --output semgrep.sarif --metrics=off --no-git-ignore
+          echo "Hallazgos por nivel:"
+          jq -r '[.runs[].results[]?.level] | group_by(.) | map("\(.[0]): \(length)") | .[]' semgrep.sarif || echo "(ninguno)"
+
+      - name: Publicar los hallazgos de Semgrep
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@v4.38.2
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      # Semgrep no "avisa y sigue": lo de nivel error frena el pipeline igual
+      # que una CRITICAL de Trivy. Lo de nivel warning e info queda en Code
+      # scanning para revisarlo, que es donde se puede ver su historia.
+      - name: Frenar si Semgrep encontró algo de nivel error
+        run: |
+          errores=$(jq '[.runs[].results[]? | select(.level == "error")] | length' semgrep.sarif)
+          if [ "$errores" -gt 0 ]; then
+            echo "::error::Semgrep encontró $errores hallazgo(s) de nivel error"
+            jq -r '.runs[].results[]? | select(.level == "error") | "  \(.ruleId) → \(.locations[0].physicalLocation.artifactLocation.uri)"' semgrep.sarif
+            exit 1
+          fi
+          echo "OK: ningún hallazgo de nivel error."
+
+      # ───────── Informes de Trivy hacia Code scanning (Reto 2) ─────────
+      #
+      # Estos pasos no son la compuerta: generan el informe en SARIF con
+      # CRITICAL y HIGH para que los hallazgos queden en Security → Code
+      # scanning, con su historia y su estado. La compuerta son los dos pasos
+      # de más abajo, que sí detienen el pipeline.
+      - name: Informe SARIF de Trivy (perfil-web)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-web.sarif
+          trivyignores: .trivyignore
+          cache: "true"
+
+      - name: Publicar los hallazgos de Trivy (perfil-web)
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@v4.38.2
+        with:
+          sarif_file: trivy-web.sarif
+          category: trivy-perfil-web
+
+      - name: Informe SARIF de Trivy (perfil-api)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGEN_API }}:${{ needs.package.outputs.etiqueta }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-api.sarif
+          trivyignores: .trivyignore
+          cache: "true"
+
+      - name: Publicar los hallazgos de Trivy (perfil-api)
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@v4.38.2
+        with:
+          sarif_file: trivy-api.sarif
+          category: trivy-perfil-api
 
       # --ignore-unfixed: una CRITICAL sin parche disponible no la arregla
       # nadie hoy, y frenar el pipeline por ella solo enseña a ignorarlo.
@@ -284,6 +370,7 @@ jobs:
           ignore-unfixed: true
           format: table
           exit-code: "1"
+          trivyignores: .trivyignore
           # Reto 1: la base de vulnerabilidades pesa y se actualiza cada 6
           # horas; no hace falta bajarla dos veces en el mismo run.
           cache: "true"
@@ -300,6 +387,7 @@ jobs:
           ignore-unfixed: true
           format: table
           exit-code: "1"
+          trivyignores: .trivyignore
           # Reto 1: la base de vulnerabilidades pesa y se actualiza cada 6
           # horas; no hace falta bajarla dos veces en el mismo run.
           cache: "true"

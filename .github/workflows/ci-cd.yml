@@ -288,7 +288,15 @@ jobs:
       # Son preguntas distintas y por eso corren las dos.
       - name: Semgrep sobre la API y el JavaScript
         run: |
-          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp             -v "$PWD:/src" -w /src semgrep/semgrep:1.179.0             semgrep scan --config p/golang --config p/javascript --config p/secrets             --sarif --output semgrep.sarif --metrics=off --no-git-ignore
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp \
+            -v "$PWD:/src" -w /src semgrep/semgrep:1.179.0 \
+            semgrep scan \
+              --config p/golang \
+              --config p/javascript \
+              --config p/secrets \
+              --config p/dockerfile \
+              --config p/github-actions \
+              --sarif --output semgrep.sarif --metrics=off --no-git-ignore
           echo "Hallazgos por nivel:"
           jq -r '[.runs[].results[]?.level] | group_by(.) | map("\(.[0]): \(length)") | .[]' semgrep.sarif || echo "(ninguno)"
 
@@ -324,8 +332,12 @@ jobs:
         with:
           image-ref: ${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
+          # El informe es más amplio que la compuerta a propósito: aquí
+          # entran también las MEDIUM y las que aún no tienen parche, para
+          # poder verlas y decidir en Code scanning. Lo que detiene el
+          # pipeline sigue siendo solo una CRITICAL con corrección.
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: false
           format: sarif
           output: trivy-web.sarif
           trivyignores: .trivyignore
@@ -344,8 +356,12 @@ jobs:
         with:
           image-ref: ${{ env.IMAGEN_API }}:${{ needs.package.outputs.etiqueta }}
           scanners: vuln
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
+          # El informe es más amplio que la compuerta a propósito: aquí
+          # entran también las MEDIUM y las que aún no tienen parche, para
+          # poder verlas y decidir en Code scanning. Lo que detiene el
+          # pipeline sigue siendo solo una CRITICAL con corrección.
+          severity: CRITICAL,HIGH,MEDIUM
+          ignore-unfixed: false
           format: sarif
           output: trivy-api.sarif
           trivyignores: .trivyignore

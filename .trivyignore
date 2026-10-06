@@ -1,0 +1,13 @@
+# Vulnerabilidades aceptadas a conciencia (Reto 2 del LAB-03).
+#
+# Aceptar una vulnerabilidad es una decisión, no un atajo. Vale la pena
+# cuando el riesgo real en ESTE sistema es nulo o muy bajo y escribirlo deja
+# constancia de por qué; es esconder el problema cuando se hace para que el
+# pipeline deje de molestar. La diferencia práctica: si no puedo explicar la
+# línea en voz alta, no va aquí, se arregla.
+#
+# Cada entrada lleva: el CVE, en qué imagen y paquete está, por qué se acepta
+# y hasta cuándo. Las entradas sin fecha no existen: una excepción eterna es
+# una excepción que nadie va a volver a mirar.
+#
+# Formato: un identificador por línea.

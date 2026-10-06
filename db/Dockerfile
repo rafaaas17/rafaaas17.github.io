@@ -5,7 +5,7 @@
 # es decir, la primera vez que arranca con un volumen nuevo.
 # Reto 5 y regla 1: el tag "16-alpine" flota. Fijado a la versión exacta y
 # sobre Alpine 3.24, que es donde están parcheadas musl y zlib.
-FROM postgres:16.15-alpine3.24
+FROM postgres:18.6-alpine3.24
 
 COPY init/ /docker-entrypoint-initdb.d/
 

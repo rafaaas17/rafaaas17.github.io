@@ -88,6 +88,40 @@ docker pull ghcr.io/rafaaas17/perfil-web:1.0
     └── verificar.yml           ← ejecuta los criterios de aceptación
 ```
 
+## Si algo sale mal: volver atrás
+
+El despliegue a producción pasa por una aprobación, pero una aprobación no evita los
+errores: evita los errores *que se ven antes de aprobar*. Para el resto hay dos caminos, y
+los dos terminan en un despliegue normal.
+
+**1. `git revert` (el que uso).** Se revierte el commit de merge que causó el problema, en
+una rama, con su pull request:
+
+```bash
+git switch main && git pull
+git switch -c fix/volver-atras
+git revert -m 1 <sha-del-merge>     # -m 1: quedarse con lo que había en main
+git push -u origin fix/volver-atras
+gh pr create --fill
+```
+
+Ese PR vuelve a pasar por `build`, `test`, `package`, `security`, `integracion` y `smoke`,
+y al mezclarlo despliega la versión anterior. Tarda lo que tarda el pipeline (unos tres
+minutos más la aprobación), y deja en el historial *qué* se deshizo y *por qué*.
+
+**2. Volver a lanzar un despliegue viejo.** En Actions se puede hacer *Re-run all jobs*
+sobre un run anterior que terminó en verde: se reconstruye desde aquel commit y se publica
+otra vez. Es más rápido, pero `main` sigue conteniendo el cambio malo: el repositorio dice
+una cosa y producción dice otra, y el próximo push lo vuelve a publicar.
+
+**Cuál elijo.** El `revert`, salvo que el sitio esté caído y cada minuto cuente. Es la idea
+del curso: todo pasa por el pipeline, y el estado de producción es el de `main`. El re-run
+es un parche para ganar tiempo, no un arreglo; después del re-run hay que revertir igual.
+
+**Probado:** [PR #33](https://github.com/rafaaas17/rafaaas17.github.io/pull/33) revirtió un
+cambio que ya estaba publicado, y el paso «Revisar el sitio publicado» confirmó que la URL
+real volvió a la versión anterior.
+
 ## La página en GitHub Pages no se rompe
 
 `https://rafaaas17.github.io` sigue publicándose con cada push a `main`, y ahí

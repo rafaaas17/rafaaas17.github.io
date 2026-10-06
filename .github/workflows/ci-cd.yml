@@ -515,6 +515,9 @@ jobs:
     permissions:
       pages: write
       id-token: write
+      # Para clonar el repositorio: el paso de verificación usa un script
+      # versionado, no un comando escrito dentro del YAML.
+      contents: read
     environment:
       # Aquí está la frontera entre Delivery y Deployment: este environment
       # tiene Required reviewers, así que el job se queda esperando.
@@ -524,6 +527,16 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Publicar el artefacto en GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      # Reto 5. Que deploy-pages termine en verde solo dice que GitHub aceptó
+      # el artefacto. Esto pregunta lo otro: ¿la página que ve un visitante
+      # funciona? Se ejecuta contra la URL real, con reintentos, porque la CDN
+      # de Pages tarda unos segundos en servir la versión nueva.
+      - name: Revisar el sitio publicado
+        run: bash scripts/verificar-produccion.sh "${{ steps.deployment.outputs.page_url }}"

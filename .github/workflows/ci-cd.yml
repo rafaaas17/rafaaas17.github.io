@@ -1,0 +1,343 @@
+# Pipeline de CI/CD del perfil — LAB-03.
+#
+# Una sola compuerta para todo lo que entra a main: build → test → package →
+# security → smoke → deploy-prod. Los jobs se encadenan con "needs", así que
+# si uno se cae los siguientes no llegan a correr.
+#
+# Continuous DELIVERY, no deployment: de build a smoke todo es automático,
+# pero el paso a producción (GitHub Pages) espera una aprobación humana. Eso
+# no está en este archivo salvo por una línea, "environment: github-pages":
+# quién aprueba se configura en Settings → Environments. Cambiar de Delivery a
+# Deployment es borrar esa regla, no tocar el pipeline.
+#
+# Este archivo reemplaza a publicar-imagenes.yml y a sin-secretos.yml, que
+# hacían por su cuenta lo que ahora son los jobs package y build.
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Mínimo privilegio: por defecto el token del workflow solo lee el
+# repositorio. El job que necesita más (publicar imágenes, escribir en Pages)
+# lo pide en su propio bloque "permissions".
+permissions:
+  contents: read
+
+env:
+  IMAGEN_WEB: ghcr.io/${{ github.repository_owner }}/perfil-web
+  IMAGEN_API: ghcr.io/${{ github.repository_owner }}/perfil-api
+  VERSION_NODE: "24"
+
+jobs:
+  # ─────────────────────────────── 2. BUILD ───────────────────────────────
+  # Linters y armado del sitio. Es la etapa más barata del pipeline, así que
+  # aquí va todo lo que puede decir "no" en segundos.
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v7
+        with:
+          # El control de credenciales mira todo el historial, no solo el
+          # último commit.
+          fetch-depth: 0
+
+      # Esto venía de sin-secretos.yml (LAB-02, Reto 6). No es un linter, pero
+      # es la revisión más barata y la que más caro sale si falta.
+      - name: Ninguna credencial versionada
+        run: bash scripts/sin-credenciales.sh
+
+      - name: Preparar Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.VERSION_NODE }}
+
+      - name: Instalar dependencias de desarrollo
+        run: npm ci
+
+      # Linter 1 de 3: el HTML que se publica.
+      - name: Lint del HTML (HTMLHint)
+        run: npx htmlhint index.html
+
+      # Linter 2 de 3: los tres Dockerfile. La configuración y las reglas que
+      # ignoro, con su porqué, están en .hadolint.yaml.
+      - name: Lint de los Dockerfile (Hadolint)
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo hadolint/hadolint:v2.15.1-alpine \
+            /bin/hadolint --config .hadolint.yaml web/Dockerfile api/Dockerfile db/Dockerfile
+          echo "OK: los tres Dockerfile pasan Hadolint."
+
+      - name: Preparar Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: api/go.mod
+
+      # Linter 3 de 3: el código de la API. gofmt es formato y go vet busca
+      # errores que compilan pero no hacen lo que uno cree.
+      - name: Lint de la API (gofmt y go vet)
+        working-directory: api
+        run: |
+          sin_formato="$(gofmt -l .)"
+          if [ -n "$sin_formato" ]; then
+            echo "::error::estos archivos no pasaron por gofmt: $sin_formato"
+            exit 1
+          fi
+          go vet ./...
+          echo "OK: gofmt y go vet limpios."
+
+      - name: Compilar la API
+        working-directory: api
+        run: go build -o /dev/null ./...
+
+      # El sitio que se publica. El mismo script lo usa el job test y lo uso
+      # yo en mi máquina: así nunca pruebo una carpeta y publico otra.
+      - name: Armar el sitio
+        run: bash scripts/armar-sitio.sh
+
+      # Sube _site/ como artefacto de Pages. Es lo único que deploy-prod puede
+      # publicar: ya no se publica la rama entera, y por eso compose.yaml,
+      # api/ y db/ dejan de estar en Internet.
+      - name: Subir el artefacto de Pages
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  # ─────────────────────────────── 3. TEST ────────────────────────────────
+  test:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v7
+
+      - name: Preparar Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.VERSION_NODE }}
+
+      - name: Instalar dependencias de desarrollo
+        run: npm ci
+
+      # No se vuelve a armar el sitio: se baja el artefacto que subió build.
+      # Lo que prueba Vitest son exactamente los bytes que va a publicar
+      # deploy-prod, no una carpeta parecida.
+      - name: Bajar el artefacto de Pages
+        uses: actions/download-artifact@v8
+        with:
+          name: github-pages
+          path: artefacto
+
+      - name: Desempaquetar el sitio en _site/
+        run: |
+          mkdir -p _site
+          tar -xf artefacto/artifact.tar -C _site
+          find _site -type f | sort
+
+      - name: Pruebas del sitio (Vitest)
+        run: npm test
+
+      - name: Preparar Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: api/go.mod
+
+      - name: Pruebas de la API (go test)
+        working-directory: api
+        run: go test ./... -v
+
+  # ────────────────────────────── 4. PACKAGE ──────────────────────────────
+  # Las imágenes se publican en GitHub Packages con el SHA del commit como
+  # tag. Nada de latest: "latest" no dice qué código hay adentro.
+  package:
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    outputs:
+      # El tag que acaban de recibir las imágenes (sha-1a2b3c4). security y
+      # smoke lo usan para bajar exactamente esta versión.
+      etiqueta: ${{ steps.meta-web.outputs.version }}
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v7
+
+      - name: Bajar el artefacto de Pages
+        uses: actions/download-artifact@v8
+        with:
+          name: github-pages
+          path: artefacto
+
+      # La imagen de web se construye con el MISMO _site/ que probó Vitest.
+      - name: Desempaquetar el sitio en _site/
+        run: |
+          mkdir -p _site
+          tar -xf artefacto/artifact.tar -C _site
+
+      - name: Preparar Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # GITHUB_TOKEN, no un token personal: dura lo que dura el job y solo
+      # puede escribir en los paquetes de este repositorio.
+      - name: Entrar en GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calcular tags y etiquetas de perfil-web
+        id: meta-web
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGEN_WEB }}
+          tags: type=sha,format=short,prefix=sha-
+
+      - name: Construir y publicar perfil-web
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: web/Dockerfile
+          # El Dockerfile copia el sitio desde esta carpeta. Por defecto es la
+          # raíz (para compose en mi máquina); aquí es el artefacto.
+          build-args: SITIO=_site
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          # org.opencontainers.image.source sale de aquí: es la etiqueta que
+          # conecta el paquete con este repositorio en la pestaña Packages.
+          labels: ${{ steps.meta-web.outputs.labels }}
+
+      - name: Calcular tags y etiquetas de perfil-api
+        id: meta-api
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGEN_API }}
+          tags: type=sha,format=short,prefix=sha-
+
+      - name: Construir y publicar perfil-api
+        uses: docker/build-push-action@v7
+        with:
+          context: ./api
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+
+  # ───────────────────────────── 5. SECURITY ──────────────────────────────
+  # Trivy no reconstruye nada: baja del registro la imagen que acaba de
+  # publicar package. Lo que se escanea es lo que se va a desplegar.
+  security:
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Entrar en GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --ignore-unfixed: una CRITICAL sin parche disponible no la arregla
+      # nadie hoy, y frenar el pipeline por ella solo enseña a ignorarlo.
+      # Si tiene corrección, es trabajo pendiente y el pipeline se detiene.
+      - name: Trivy sobre perfil-web
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGEN_WEB }}:${{ needs.package.outputs.etiqueta }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+
+      - name: Trivy sobre perfil-api
+        # Aunque la anterior falle, quiero ver también esta: dos problemas se
+        # arreglan en un viaje, no en dos.
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGEN_API }}:${{ needs.package.outputs.etiqueta }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+
+  # ─────────────────────────────── 7. SMOKE ───────────────────────────────
+  # Sin ambiente DEV, el humo se prueba en el propio runner: se levanta la
+  # imagen ya escaneada y se le hacen dos preguntas. Tiene que durar segundos.
+  smoke:
+    needs: [package, security]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Entrar en GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --add-host api:127.0.0.1 no es un adorno: nginx resuelve los nombres de
+      # sus "upstream" cuando arranca, no cuando llega una petición. Fuera de
+      # la red de Compose el nombre "api" no existe y nginx se niega a
+      # arrancar con "host not found in upstream". Aquí solo se prueba el
+      # sitio estático, así que le basta con que el nombre resuelva a algo;
+      # el libro de visitas se prueba contra la aplicación completa en el job
+      # de integración.
+      - name: Levantar la imagen de web
+        run: |
+          docker run -d --name smoke -p 8080:8080 --add-host api:127.0.0.1 \
+            "$IMAGEN_WEB:${{ needs.package.outputs.etiqueta }}"
+
+      - name: GET / responde 200 y trae mi nombre
+        run: |
+          for i in $(seq 1 20); do
+            if curl -fsS -o pagina.html -w "HTTP %{http_code}\n" http://localhost:8080/; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q "Rafael Alarcón Romero" pagina.html
+          echo "OK: la página responde y dice mi nombre."
+          curl -fsS -o /dev/null -w "healthz: HTTP %{http_code}\n" http://localhost:8080/healthz
+
+      - name: Logs del contenedor si algo falló
+        if: failure()
+        run: docker logs smoke
+
+  # ──────────────────────────── 8. DEPLOY PROD ────────────────────────────
+  # Producción es GitHub Pages. Solo se despliega desde main: un pull request
+  # pasa por todas las compuertas pero nunca publica.
+  deploy-prod:
+    needs: smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      # Aquí está la frontera entre Delivery y Deployment: este environment
+      # tiene Required reviewers, así que el job se queda esperando.
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Publicar el artefacto en GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

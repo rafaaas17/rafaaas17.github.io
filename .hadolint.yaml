@@ -1,0 +1,19 @@
+# Configuración de Hadolint, el linter de los Dockerfile.
+#
+# failure-threshold: warning, y no error, a propósito. DL3006 ("usa siempre un
+# tag en el FROM") es un warning, y ese es justo el error que el laboratorio
+# pide que ponga el job build en rojo. Con el umbral en "error", un FROM sin
+# tag pasaría sin que nadie se entere.
+failure-threshold: warning
+
+ignored:
+  # DL3018: "fija la versión de cada paquete en apk add".
+  #
+  # En api/Dockerfile instalo ca-certificates y tzdata sobre alpine:3.24.2,
+  # que es un tag de parche exacto. El índice de paquetes de esa imagen ya
+  # está congelado, así que fijar además la versión de cada paquete no agrega
+  # reproducibilidad: lo que la fija es el tag de la base. Lo que sí haría es
+  # obligarme a editar el Dockerfile cada vez que Alpine publica un parche de
+  # seguridad, que es exactamente lo que quiero que entre solo cuando suba la
+  # versión de la base.
+  - DL3018

@@ -37,14 +37,25 @@ FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24
 # Regla 3: primero la configuración, que casi nunca cambia; después el sitio,
 # que cambia en cada commit. Así editar el perfil no invalida la capa de nginx.
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
-COPY index.html estilos.css libro-de-visitas.js /usr/share/nginx/html/
+
+# De dónde sale el sitio que se copia a la imagen.
+#
+# Por defecto, la raíz: así "docker compose up" sigue funcionando en mi
+# máquina sin pasos previos. En el pipeline (LAB-03) se construye con
+# --build-arg SITIO=_site, que es la carpeta que armó el job build y que
+# probó Vitest. De ese modo la imagen que se escanea, la que pasa el smoke
+# y la página que se publica llevan exactamente los mismos archivos.
+ARG SITIO=.
+COPY ${SITIO}/index.html ${SITIO}/estilos.css ${SITIO}/libro-de-visitas.js /usr/share/nginx/html/
 
 # Regla 6: nada de credenciales. Este contenedor no tiene ninguna que guardar.
 EXPOSE 8080
 
 # Reto 2: wget de busybox contra el /healthz que define nginx.conf.
+# Forma JSON (DL3025): sin ella Docker envuelve el comando en un shell
+# implícito. Aquí el shell se nombra, porque hace falta para el "||".
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+    CMD ["sh", "-c", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
 
 # La imagen oficial ya trae su ENTRYPOINT y arranca nginx en primer plano
 # (regla 4: un proceso por contenedor, y que sea el PID 1 el que reciba SIGTERM).

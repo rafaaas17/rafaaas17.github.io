@@ -1,0 +1,53 @@
+# Dependabot (Reto 4 del LAB-03).
+#
+# Fijar cada acción a un SHA completo cierra la puerta a que alguien mueva un
+# tag debajo de mis pies, pero abre otra: un SHA no se actualiza solo, y una
+# acción vieja se queda con sus vulnerabilidades. Dependabot es la otra mitad
+# del trato: abre un pull request cuando sale una versión nueva, con el SHA
+# nuevo y el enlace a las notas de la versión, y ese PR pasa por el mismo
+# pipeline que cualquier otro cambio.
+version: 2
+
+updates:
+  # Las acciones del pipeline.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: Actualizar
+
+  # Las dependencias de las pruebas (Vitest, jsdom, HTMLHint).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: Actualizar
+
+  # Las imágenes base de los tres Dockerfile.
+  - package-ecosystem: docker
+    directories:
+      - /web
+      - /api
+      - /db
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: Actualizar
+
+  # La API en Go.
+  - package-ecosystem: gomod
+    directory: /api
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: Actualizar

@@ -32,7 +32,7 @@
 # Reto 5: rama mainline (1.31) sobre Alpine 3.24 y tag fijo hasta el parche.
 # La 1.27 sobre Alpine 3.20 arrastraba las mismas CVE de musl, zlib, libxml2 y
 # nghttp2 que la API, más las del propio nginx.
-FROM nginxinc/nginx-unprivileged:1.31.6-alpine3.24
+FROM nginxinc/nginx-unprivileged:1.21.6-alpine
 
 # Regla 3: primero la configuración, que casi nunca cambia; después el sitio,
 # que cambia en cada commit. Así editar el perfil no invalida la capa de nginx.

@@ -24,6 +24,84 @@ navegador ──HTTP──▶ web ──proxy /api/──▶ api ──SQL──
 
 ---
 
+## El pipeline (LAB-03)
+
+Todo lo que entra a `main` pasa por [`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml).
+Los jobs se encadenan con `needs`: si uno falla, los siguientes no corren.
+
+```
+build ──▶ test ──▶ package ──▶ security ──┬─▶ smoke ──────┬─▶ deploy-prod
+ lint      vitest    ghcr        trivy     │   contenedor  │   ✋ aprobación
+ _site/    go test   sha-<commit> semgrep   └─▶ integracion ┘
+```
+
+| Job | Qué hace | Qué lo pone en rojo |
+|---|---|---|
+| `build` | Control de credenciales, HTMLHint sobre `index.html`, Hadolint sobre los tres `Dockerfile`, `gofmt` + `go vet`, compila la API y arma `_site/` | Un `<img>` sin `alt`, un `FROM` sin tag, código sin formatear, una contraseña versionada |
+| `test` | Baja el artefacto de Pages y corre Vitest sobre **esos** bytes (13 pruebas), más `go test` de la API | Una prueba del sitio o de la API |
+| `package` | Publica `perfil-web` y `perfil-api` en GHCR con el tag `sha-<commit>` | Un `Dockerfile` que no construye |
+| `security` | Trivy sobre las dos imágenes recién publicadas y Semgrep sobre mi código | Una `CRITICAL` con corrección, o un hallazgo de nivel `error` |
+| `integracion` | Levanta los tres servicios con Compose y prueba el contrato de la API pasando por nginx; escanea la imagen de la base | Un 502, un código HTTP distinto del esperado, un mensaje que no llega a Postgres |
+| `smoke` | Baja la imagen escaneada, la levanta y le pide `GET /` | Que no responda 200 o que la página no traiga mi nombre |
+| `deploy-prod` | Publica `_site/` en Pages y revisa la URL ya publicada | Solo corre en push a `main`, y **espera aprobación** |
+
+Lo que se prueba, lo que se empaqueta y lo que se publica es el mismo `_site/`: `build` lo
+sube una vez como artefacto y los demás jobs lo bajan, en vez de volver a armarlo.
+
+Cada run deja un **resumen** con el resultado de las pruebas, las vulnerabilidades por
+severidad y la URL desplegada, para que quien aprueba sepa qué está aprobando.
+
+### Qué se publica
+Desde el LAB-03, GitHub Pages ya no sirve la rama: sirve el artefacto que arma
+`scripts/armar-sitio.sh`, que lleva `index.html`, `estilos.css` y `libro-de-visitas.js` y
+nada más. Por eso `https://rafaaas17.github.io/compose.yaml` ahora responde **404**.
+
+## Delivery o deployment
+
+Mi pipeline es **Continuous Delivery**: de `build` a `smoke` todo es automático y, cuando
+termina, la versión ya está construida, escaneada, probada y subida a GitHub Packages, es
+decir, lista para producción. El único paso que no ocurre solo es el último:
+`deploy-prod` se queda en *Waiting* hasta que alguien aprueba el despliegue.
+
+### Qué cambiaría para que fuera Continuous Deployment
+
+Una sola cosa, y no está en el código:
+
+| | Hoy (Delivery) | Continuous Deployment |
+|---|---|---|
+| `build` → `smoke` | automático | automático |
+| Paso a producción | el environment `github-pages` tiene **Required reviewers**, y el job espera | sin esa regla, `deploy-prod` arranca apenas termina `smoke` |
+| Qué hay que tocar | — | Settings → Environments → `github-pages` → quitar *Required reviewers* |
+
+En `ci-cd.yml` no cambiaría ni una línea: la espera no la produce el workflow sino la
+regla de protección del environment. Esa es la parte que me sorprendió del Bloque 02: la
+frontera entre las dos prácticas es una casilla de configuración, no una arquitectura
+distinta.
+
+### Cuándo sí lo haría
+
+Cuando el pipeline sepa responder *solo* la pregunta que hoy respondo yo al aprobar: «¿esto
+está bien para producción?». Para este sitio estático eso estaría cerca: tengo linters,
+13 pruebas sobre el artefacto, Trivy sobre la imagen, un smoke sobre el contenedor, una
+verificación de la URL después de desplegar (Reto 5) y una vuelta atrás probada. Con eso,
+la aprobación manual agrega poco: un humano mirando una pantalla verde termina aprobando
+sin leer, y una aprobación que siempre se da no es un control, es un trámite.
+
+### Cuándo no lo haría
+
+- **Cuando la vuelta atrás no es barata.** Aquí revertir es otro despliegue de dos
+  minutos. Con una migración de base de datos que borra una columna, no hay botón de
+  deshacer, y ahí la aprobación es lo que separa un error de un incidente.
+- **Cuando el despliegue tiene un costo fuera del sistema:** una app móvil que pasa por
+  revisión de la tienda, un cliente que tiene que avisar a sus usuarios, un corte
+  acordado con un área de negocio.
+- **Cuando el pipeline todavía no cubre lo que importa.** Si no tengo pruebas de lo que
+  de verdad puede romperse, automatizar el paso a producción no me da velocidad: me da
+  errores más rápido.
+- **Cuando hay una regla externa que exige la firma de una persona** (un control de
+  cambios, una auditoría). Ahí la aprobación no es técnica, es la evidencia de quién
+  autorizó qué, y el registro del environment la deja por escrito.
+
 ## Cómo levantarlo
 
 ### En GitHub Codespaces
@@ -84,11 +162,31 @@ docker pull ghcr.io/rafaaas17/perfil-web:1.0
 │   ├── devcontainer.json       ← arranque automático en Codespaces
 │   ├── preparar-entorno.sh     ← genera el .env (una vez)
 │   └── levantar.sh             ← docker compose up (cada arranque)
-└── .github/workflows/
-    ├── publicar-imagenes.yml   ← construye y publica en GHCR
-    ├── sin-secretos.yml        ← vigila que no entre ninguna credencial
-    └── verificar.yml           ← ejecuta los criterios de aceptación
+├── scripts/
+│   ├── armar-sitio.sh          ← arma _site/, lo único que se publica
+│   ├── sin-credenciales.sh     ← vigila que no entre ninguna credencial
+│   ├── pruebas-integracion.sh  ← contrato de la API, pasando por nginx
+│   ├── verificar-produccion.sh ← revisa la URL ya publicada
+│   └── resumen-pruebas.sh      ← resumen del run
+├── tests/
+│   └── sitio.test.js           ← 13 pruebas del sitio (Vitest + jsdom)
+├── package.json                ← Vitest, jsdom y HTMLHint
+├── .htmlhintrc                 ← reglas del linter de HTML
+├── .hadolint.yaml              ← reglas del linter de Dockerfile
+├── .trivyignore                ← vulnerabilidades aceptadas, con su porqué
+└── .github/
+    ├── dependabot.yml          ← acciones, npm, docker y Go al día
+    ├── scripts/
+    │   └── resumen-trivy.py    ← resume el JSON de Trivy (texto o Markdown)
+    └── workflows/
+        ├── ci-cd.yml           ← el pipeline: seis etapas y una aprobación
+        └── verificar.yml       ← criterios del LAB-02, solo a mano
 ```
+
+`publicar-imagenes.yml` y `sin-secretos.yml` desaparecieron en el LAB-03: lo que hacían
+son ahora el job `package` y el primer paso de `build`. `verificar.yml` no es un segundo
+pipeline: solo corre a mano (`workflow_dispatch`) y existe para reproducir los criterios
+de aceptación del LAB-02 en un runner limpio.
 
 ## Si algo sale mal: volver atrás
 
@@ -120,18 +218,300 @@ una cosa y producción dice otra, y el próximo push lo vuelve a publicar.
 del curso: todo pasa por el pipeline, y el estado de producción es el de `main`. El re-run
 es un parche para ganar tiempo, no un arreglo; después del re-run hay que revertir igual.
 
-**Probado:** [PR #33](https://github.com/rafaaas17/rafaaas17.github.io/pull/33) revirtió un
+**Probado:** [PR #34](https://github.com/rafaaas17/rafaaas17.github.io/pull/34) revirtió un
 cambio que ya estaba publicado, y el paso «Revisar el sitio publicado» confirmó que la URL
 real volvió a la versión anterior.
 
 ## La página en GitHub Pages no se rompe
 
-`https://rafaaas17.github.io` sigue publicándose con cada push a `main`, y ahí
+`https://rafaaas17.github.io` se publica desde el pipeline, cuando apruebo el despliegue
+(antes del LAB-03 salía con cada push a `main`), y ahí
 **no hay backend**: `/api/mensajes` devuelve un 404 con HTML.
 `libro-de-visitas.js` lo detecta —comprueba el código de estado *y* que el
 `Content-Type` sea JSON—, deja la sección con su atributo `hidden`, escribe un
 aviso en la consola y no toca nada más. El perfil se ve exactamente igual que
 en el LAB-01.
+
+---
+
+## Bitácora de decisiones — LAB-03
+
+La evidencia de esta bitácora son los runs de la pestaña
+[Actions](https://github.com/rafaaas17/rafaaas17.github.io/actions/workflows/ci-cd.yml).
+Cada entrada enlaza el run que la demuestra: uno en rojo cuando rompí algo a propósito y
+otro en verde cuando lo arreglé.
+
+### Reto 1: Pipeline rápido
+
+- **Decisión:** cuatro cachés y un job en paralelo. `~/.npm` con `package-lock.json` como
+  clave, los módulos y la caché de compilación de Go con `go.sum`, las capas de Docker en
+  la caché de Actions (`type=gha`) y la base de vulnerabilidades de Trivy. Las pruebas de
+  integración corren en paralelo con el smoke.
+- **Antes y después** (el mismo pipeline, lo único que cambia son las cachés):
+
+  | Job | Sin cachés | Con cachés | |
+  |---|---:|---:|---|
+  | `build` | 41 s | 28 s | −32 % |
+  | `test` | 36 s | 25 s | −31 % |
+  | `package` | 47 s | 36 s | −23 % |
+  | `security` | 21 s | 16 s | −24 % |
+  | `smoke` | 8 s | 9 s | +1 s |
+  | **Reloj del run** | **200 s** | **124 s** | **−38 %** |
+
+  - Sin cachés: [run 37537619419](https://github.com/rafaaas17/rafaaas17.github.io/actions/runs/37537619419)
+  - Con cachés: [run 37538483897](https://github.com/rafaaas17/rafaaas17.github.io/actions/runs/37538483897)
+    (es el mismo run relanzado cuando las cachés de `main` ya estaban llenas)
+
+  La diferencia entre la suma de los jobs (153 s → 114 s) y el reloj (200 s → 124 s) es el
+  tiempo que tarda cada runner en arrancar: seis máquinas en cadena arrancan seis veces.
+- **Alternativas que evalué:**
+  1. *Juntar jobs para pagar menos arranques.* Build y test en uno solo ahorraban unos 15 s.
+     En contra: se pierde la lectura de la pestaña Actions (¿falló el linter o una prueba?)
+     y se pierde la compuerta. No vale 15 s.
+  2. *Paralelizar la cadena principal.* No se puede sin romper lo que el pipeline promete:
+     `package` solo tiene sentido si `test` pasó, y `security` solo si existe la imagen.
+     El único paralelismo honesto es entre jobs que dependen de lo mismo y no entre sí:
+     `integracion` y `smoke`, los dos hijos de `security`.
+  3. *No cachear nada y vivir con tres minutos.* Es defendible hoy, con un sitio de tres
+     archivos; deja de serlo en la semana 6, cuando el pipeline haga más cosas.
+- **Por qué elegí esta:** la caché no cambia lo que el pipeline comprueba, solo lo que
+  vuelve a descargar. Ninguna compuerta se saltó para ganar tiempo.
+- **Fuentes consultadas:**
+  - https://docs.github.com/actions/how-tos/write-workflows/choose-what-workflows-do/cache-dependencies
+  - https://docs.docker.com/build/cache/backends/gha/
+  - https://github.com/actions/setup-node#caching-global-packages-data
+- **Cómo lo verifiqué:** con la tabla de arriba, sacada de la pestaña Actions. Los dos runs
+  tienen exactamente el mismo contenido de workflow: el segundo es el primero relanzado.
+- **Qué no me funcionó:** medir el primer run con cachés. Salió **más lento** que el de
+  antes (242 s), y por un momento pensé que las cachés empeoraban las cosas. Lo que pasaba
+  es que ese run era el que las estaba *llenando*: `cache-to: type=gha,mode=max` sube todas
+  las capas, y eso cuesta. La medición que vale es la del estado estable, no la del primer
+  día. Aprendí también que una caché creada en una rama no la ve `main`, pero la de `main`
+  sí la ven todas las ramas.
+
+### Reto 2: SAST y resultados a la vista
+
+- **Decisión:** Semgrep (OSS, en contenedor) corre dentro del job `security` sobre la API
+  en Go, el JavaScript del sitio, los Dockerfile y los propios workflows. Sus hallazgos y
+  los de Trivy se publican en Security → Code scanning con `upload-sarif`, en tres
+  categorías separadas. Lo de nivel `error` frena el pipeline; el resto queda registrado.
+- **Alternativas que evalué:**
+  1. *CodeQL.* A favor: es de GitHub, se integra sin SARIF intermedio y su análisis es más
+     profundo (sigue el flujo de los datos, no solo el patrón). En contra: para Go necesita
+     compilar y su análisis tarda varios minutos por lenguaje; con el Reto 1 encima, le
+     agregaba al pipeline más de lo que yo iba a leer.
+  2. *Bandit.* Descartado por un motivo simple: es solo para Python y aquí no hay Python
+     de producción.
+  3. *Semgrep.* Corre en ~15 s, trae reglas listas por lenguaje (`p/golang`,
+     `p/javascript`, `p/secrets`, `p/dockerfile`, `p/github-actions`) y escupe SARIF.
+- **Por qué elegí esta:** por el costo por hallazgo. En un sitio de este tamaño, Semgrep me
+  da la mayoría del valor en una fracción del tiempo, y el tiempo del pipeline es lo que
+  decide si la gente lo espera o lo ignora.
+- **La diferencia entre las tres cosas que escanean:**
+  | | Qué mira | Herramienta aquí |
+  |---|---|---|
+  | SAST | el código que escribo yo | Semgrep |
+  | SCA | las dependencias que declaro (`go.sum`, `package-lock.json`) | Trivy y Dependabot |
+  | Escaneo de imagen | el sistema operativo y los binarios dentro del contenedor | Trivy |
+- **Fuentes consultadas:**
+  - https://semgrep.dev/docs/
+  - https://docs.github.com/code-security/code-scanning/integrating-with-code-scanning/uploading-a-sarif-file-to-github
+  - https://github.com/aquasecurity/trivy-action
+- **Cómo lo verifiqué:** en su primera corrida, Semgrep devolvió **28 hallazgos** y los
+  dejó en Code scanning; después de arreglarlos, la misma categoría quedó en 0. Para ver a
+  Trivy encontrando cosas hay un PR aparte con una imagen base vieja.
+- **Qué no me funcionó:** mi idea inicial era que el informe y la compuerta fueran el mismo
+  escaneo. No sirve: la compuerta tiene que ser estrecha (`CRITICAL` con corrección) para
+  que un rojo signifique algo, y el informe tiene que ser amplio (hasta `MEDIUM`, incluidas
+  las que no tienen parche) para que Code scanning sirva de inventario. Son dos escaneos
+  con dos propósitos, y solo uno tiene `exit-code: 1`.
+
+### Reto 3: Pruebas de integración con Compose
+
+- **Decisión:** un job `integracion` que levanta los tres servicios con
+  `docker compose up -d --build --wait` y corre `scripts/pruebas-integracion.sh`, que prueba
+  el contrato de la API **desde fuera**, pasando por nginx: `GET /api/health` 200, un POST
+  válido 201, un POST sin nombre 400, uno de 281 caracteres 400, uno con cuerpo que no es
+  JSON 400, y el mensaje recién creado aparece en `GET /api/mensajes`.
+- **Cómo arranca Compose sin mi `.env`:** el runner no lo tiene, y `compose.yaml` se niega a
+  arrancar sin él (`${POSTGRES_PASSWORD:?...}`). Lo genera el mismo script del Codespace,
+  `.devcontainer/preparar-entorno.sh`, con `openssl rand -hex 24`. La credencial nace y
+  muere dentro del job: no hay ningún secreto que guardar en GitHub ni que rotar después.
+- **Alternativas que evalué:**
+  1. *Un secreto de repositorio con la contraseña de pruebas.* Funciona, pero agrega un
+     secreto de verdad para una base de datos que vive 90 segundos, y además hay que
+     acordarse de rotarlo.
+  2. *Escribir estas pruebas en Vitest con `fetch`.* Habría quedado todo en un solo
+     lenguaje. Lo descarté porque obliga a instalar Node y las dependencias en un job que
+     solo necesita `curl`, y porque el contrato se lee mejor como una tabla de códigos HTTP.
+  3. *Escribirlas con `curl` en un script* (elegida): sin dependencias, y el mismo script
+     lo puedo correr en mi máquina contra `localhost:8080`.
+- **Por qué el último caso es el importante:** comprobar que el POST devuelve 201 solo prueba
+  que la API contestó. Buscar el mensaje en el GET siguiente prueba que llegó hasta
+  PostgreSQL y volvió, que es lo que el visitante espera.
+- **`if: failure()`:** los logs de los contenedores solo se imprimen cuando algo falla. En
+  verde, ochenta líneas de logs son ruido que nadie lee y que esconde lo que importa.
+- **Fuentes consultadas:**
+  - https://docs.docker.com/reference/cli/docker/compose/up/ (`--wait`, `--wait-timeout`)
+  - https://docs.github.com/actions/reference/workflows-and-actions/expressions#failure
+- **Cómo lo verifiqué:** con los dos runs que pide el reto.
+  - 🔴 [run 37541732659](https://github.com/rafaaas17/rafaaas17.github.io/actions/runs/37541732659)
+    ([PR #30](https://github.com/rafaaas17/rafaaas17.github.io/pull/30), cerrado sin mezclar):
+    cambié `proxy_pass http://api:3000` por `3001` en `nginx.conf`. `build`, `test`,
+    `package`, `security` y `smoke` siguieron **en verde**, y `integracion` se puso en rojo
+    con siete 502. Ese es el error que ninguna otra etapa puede ver.
+  - 🟢 [run 37541272923](https://github.com/rafaaas17/rafaaas17.github.io/actions/runs/37541272923)
+    ([PR #29](https://github.com/rafaaas17/rafaaas17.github.io/pull/29)): con el proxy
+    correcto, las ocho comprobaciones pasan.
+- **Qué no me funcionó:** mi primera idea era probar el libro de visitas dentro del job
+  `smoke`, con la imagen de `web` sola. No se puede: sin la red de Compose, nginx ni
+  siquiera arranca, porque resuelve el nombre `api` al iniciar y no al recibir la petición.
+  Por eso `smoke` levanta la imagen con `--add-host api:127.0.0.1` y se limita al sitio
+  estático, y la aplicación completa se prueba en su propio job.
+
+### Reto 4: mínimo privilegio y cadena de suministro
+
+- **Decisión:** las 28 referencias a acciones de terceros quedaron fijadas al SHA completo
+  del commit, con la versión al lado como comentario, y Dependabot vigila cuatro
+  ecosistemas (`github-actions`, `npm`, `docker`, `gomod`). Cada job declara sus propios
+  `permissions`; el workflow entero arranca con `contents: read`.
+- **Cómo apareció:** no lo busqué yo. La primera corrida de Semgrep devolvió 28 hallazgos
+  de una sola regla, `github-actions-mutable-action-tag`, uno por cada acción fijada con un
+  tag. Y la protección de `main` no dejó mezclar el PR mientras esos hilos siguieran
+  abiertos. El control encontró el problema del reto siguiente.
+- **Por qué un tag no alcanza:** un tag de Git es un puntero que su dueño puede mover a otro
+  commit. Si alguien compromete el repositorio de una acción y reapunta `v45`, mi pipeline
+  ejecuta código nuevo sin que yo toque una línea, y con el token del workflow en la mano.
+  Es lo que pasó con `tj-actions/changed-files` en marzo de 2025. Un SHA no se puede mover:
+  identifica el contenido.
+- **Alternativas que evalué:**
+  1. *Dejar los tags y confiar en los mantenedores.* Es lo más cómodo y lo que hace casi
+     todo el mundo; el costo aparece una sola vez, y es enorme.
+  2. *Fijar por SHA sin Dependabot.* Cierra la puerta de los tags y abre la de las acciones
+     viejas: un SHA nunca se actualiza solo, y nadie se acuerda de revisarlo a mano.
+  3. *Fijar por SHA con Dependabot* (elegida): el SHA fija qué se ejecuta, Dependabot
+     propone el cambio y el pipeline lo revisa antes de entrar.
+- **Permisos:** el workflow empieza con `contents: read`. Solo `package` tiene
+  `packages: write` y solo `security` tiene `security-events: write`. Un `write-all`
+  convertiría a cualquier acción de terceros en dueña del repositorio: podría escribir
+  commits, abrir releases, borrar ramas o leer los secretos a los que llegue el job.
+- **Fuentes consultadas:**
+  - https://docs.github.com/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions
+  - https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-incident
+  - https://docs.github.com/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot
+- **Cómo lo verifiqué:** Semgrep pasó de 28 hallazgos a 0 en el mismo PR, y los hilos de
+  Code scanning quedaron resueltos solos.
+- **Qué no me funcionó:** intenté mezclar el PR con los 28 hallazgos abiertos, pensando que
+  eran solo avisos. La protección de la rama lo impidió por `required conversation
+  resolution`. Me pareció molesto durante treinta segundos y correcto después.
+
+### Reto 5: Revisar producción y volver atrás
+
+- **Decisión:** después de `deploy-pages`, un paso corre
+  `scripts/verificar-produccion.sh` contra la URL que devuelve `page_url`, con reintentos.
+  Comprueba nueve cosas: que `GET /` responde 200, que la página trae mi nombre, que
+  `/api/mensajes` da 404 (en Pages no hay backend) y que la sección del libro de visitas
+  sigue con su atributo `hidden`, y que `compose.yaml`, `.env.example`, `api/main.go` y
+  `README.md` no están publicados.
+- **Por qué las dos del libro de visitas:** es la parte frágil. En Pages no hay API, así
+  que `libro-de-visitas.js` detecta el 404 y deja la sección oculta. Si alguien quitara ese
+  `hidden`, el visitante vería un formulario que no puede enviar nada, y ni los linters ni
+  Vitest lo notarían: en el HTML estaría todo bien.
+- **Reintentos, no un `sleep`:** la CDN de Pages tarda unos segundos en servir la versión
+  nueva. Un `sleep 30` es una apuesta: si tarda 40 s falla, y si tarda 2 s desperdicia 28.
+  El script reintenta hasta diez veces cada 6 s y sigue apenas responde.
+- **La vuelta atrás, probada:** desplegué a propósito la sección «Ahora estoy
+  **aprendiedo**» ([PR #33](https://github.com/rafaaas17/rafaaas17.github.io/pull/33)). Una
+  errata que ningún linter ve y ninguna prueba detecta, porque no es un error técnico. La
+  revertí con [PR #34](https://github.com/rafaaas17/rafaaas17.github.io/pull/34)
+  (`git revert -m 1`), el PR pasó por las seis compuertas y al mezclarlo el sitio volvió a
+  la versión anterior. Después la agregué bien escrita en el
+  [PR #35](https://github.com/rafaaas17/rafaaas17.github.io/pull/35).
+- **¿`git revert` o relanzar un despliegue viejo?** Las dos cosas devuelven el sitio
+  anterior, pero solo una deja el repositorio diciendo la verdad. Con *Re-run all jobs* de
+  un run antiguo, producción vuelve atrás y `main` se queda con el cambio malo: el
+  siguiente push lo vuelve a publicar, y entre tanto nadie sabe qué hay desplegado
+  mirando el código. Con `revert`, el estado de producción sigue siendo el de `main` y el
+  historial explica qué se deshizo. El re-run lo dejo para una urgencia donde los tres
+  minutos del pipeline importen, y aun así después hay que revertir.
+- **Alternativas que evalué:** hacer la comprobación con `curl` suelto dentro del YAML
+  (más corto, pero no se puede correr en la máquina ni se lee bien), o montar un
+  `workflow_dispatch` aparte para verificar a demanda (útil, pero entonces la verificación
+  deja de ser parte del despliegue y se convierte en algo que alguien tiene que acordarse
+  de lanzar).
+- **Fuentes consultadas:**
+  - https://github.com/actions/deploy-pages (la salida `page_url`)
+  - https://docs.github.com/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs
+  - https://git-scm.com/docs/git-revert (`-m 1` en un commit de merge)
+- **Cómo lo verifiqué:** el paso «Revisar el sitio publicado» del
+  [run 37542421385](https://github.com/rafaaas17/rafaaas17.github.io/actions/runs/37542421385)
+  lista las nueve comprobaciones en verde, y el
+  [run de la vuelta atrás](https://github.com/rafaaas17/rafaaas17.github.io/actions/runs/37548317497)
+  las repite sobre la versión revertida.
+- **Qué no me funcionó:** la primera versión del script daba por buena cualquier respuesta
+  200. Un 200 también lo devuelve una página de error de Pages, así que agregué la
+  comprobación del nombre: 200 dice que algo contestó, no que sea mi perfil.
+
+### Reto 6: El pipeline se explica solo
+
+- **Decisión:** cada run escribe en `$GITHUB_STEP_SUMMARY` cuántas pruebas corrieron y
+  cuántas pasaron (sitio y API por separado), el conteo de vulnerabilidades por severidad
+  de cada imagen con la tabla de CRITICAL y HIGH, cuántos hallazgos devolvió Semgrep, qué
+  imagen probó el smoke y a qué URL se desplegó. El README lleva el badge del workflow.
+- **Por qué:** quien aprueba el despliegue tiene que saber qué está aprobando. Si para eso
+  hay que abrir seis logs, nadie lo hace y la aprobación se vuelve un trámite: se aprieta
+  «Approve» porque todo está verde. El resumen pone en una pantalla lo que justifica el
+  clic.
+- **Alternativas que evalué:**
+  1. *El formato `table` de Trivy directo al resumen.* Es lo más rápido de escribir, pero
+     la tabla de Trivy mide 120 columnas y en el resumen se corta.
+  2. *El formato `template` de Trivy con una plantilla Go.* Da control total, a cambio de
+     aprender su sintaxis y mantenerla en un archivo aparte.
+  3. *Reutilizar `resumen-trivy.py` del LAB-02* (elegida): ya existía, ya sabía leer el
+     JSON de Trivy y solo le agregué una salida en Markdown. Una herramienta menos que
+     aprender y un script menos que mantener.
+- **Detalle que me gustó:** el detalle de las pruebas que fallaron sale con `<details open>`
+  y el resto plegado. Lo que está bien se cuenta; lo que está mal se lee.
+- **Fuentes consultadas:**
+  - https://docs.github.com/actions/how-tos/write-workflows/choose-what-workflows-do/control-the-concurrency-of-workflows-and-jobs
+  - https://github.blog/news-insights/product-news/supercharging-github-actions-with-job-summaries/
+  - https://docs.github.com/actions/how-tos/monitor-workflows/add-a-status-badge
+- **Cómo lo verifiqué:** en el resumen de cualquier run de `main` desde el PR #32.
+- **Qué no me funcionó:** la primera versión corría `go test` dos veces, una para el log
+  legible y otra para el JSON. Lo arreglé con `tee` y `jq`, y con `set -o pipefail`, porque
+  sin eso el paso tomaba el código de salida de `jq` y una prueba en rojo pasaba por verde.
+  Es el tipo de error que convierte un pipeline en decoración.
+
+### Sobre el B3: cómo le llega `_site/` al job test
+
+- **Decisión:** el job `build` arma `_site/` con `scripts/armar-sitio.sh` y lo sube con
+  `actions/upload-pages-artifact`. El job `test` **baja ese mismo artefacto** y lo
+  desempaqueta antes de correr Vitest. El job `package` hace lo mismo y construye la
+  imagen de `web` con `--build-arg SITIO=_site`.
+- **Alternativas que evalué:**
+  1. *Volver a ejecutar `scripts/armar-sitio.sh` en el job test.* A favor: más simple, un
+     paso menos y sin esperar a que el artefacto suba y baje (unos 8 s). En contra: pruebo
+     una carpeta que armé por segunda vez. Si el script dependiera de algo del entorno
+     (una variable, un archivo que solo existe en un runner, la fecha), podría armar algo
+     distinto y yo estaría probando una carpeta y publicando otra.
+  2. *Un solo job que haga build, test y package.* A favor: `_site/` no viaja a ningún
+     lado. En contra: pierdo las compuertas: en la pestaña Actions ya no puedo ver si lo
+     que falló fue el linter o una prueba, y no puedo paralelizar nada.
+- **Por qué elegí esta:** el artefacto es exactamente lo que `deploy-pages` publica. Al
+  probar el artefacto, Vitest revisa los mismos bytes que terminan en producción, y la
+  imagen de `web` también se construye con ellos. Que el script sea determinista es algo
+  que yo creo; que el tar sea el mismo es algo que el pipeline demuestra.
+- **Fuentes consultadas:**
+  - https://github.com/actions/upload-pages-artifact
+  - https://github.com/actions/download-artifact
+  - https://docs.github.com/actions/how-tos/write-workflows/choose-what-workflows-do/store-and-share-data
+- **Cómo lo verifiqué:** en el job `test`, el paso «Desempaquetar el sitio en `_site/`»
+  lista los archivos: `index.html`, `estilos.css` y `libro-de-visitas.js`, y nada más. Y
+  la prueba «no incluye archivos internos del repositorio» falla si ahí aparece
+  `compose.yaml`, `api/`, `db/`, `.env.example` o `tests/`.
+- **Qué no me funcionó:** la primera versión armaba `_site/` otra vez en `test`. Funcionaba,
+  pero no demostraba nada: el día que el script cambie en una rama y el workflow no, las
+  dos carpetas dejan de ser la misma y ninguna prueba se entera.
 
 ---
 

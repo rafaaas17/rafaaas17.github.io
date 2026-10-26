@@ -19,7 +19,7 @@
 # versión de Go. Compilando con 1.23 aparecieron 35 HIGH y 3 CRITICAL de
 # net/http, net/url, crypto/tls, encoding/xml y html/template. Con 1.27.1
 # desaparecen: es el compilador el que las arregla, no el código de la API.
-FROM golang:1.27.1-alpine3.24 AS build
+FROM golang:1.27.3-alpine3.24 AS build
 
 WORKDIR /src
 

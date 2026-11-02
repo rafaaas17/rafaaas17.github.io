@@ -52,7 +52,7 @@ RUN CGO_ENABLED=0 GOOS=linux \
 # todo lo que corre en esta imagen, incluido el binario estático cuando llama
 # al resolver de DNS) y CVE-2026-22184 en zlib. No hay nada que parchear a
 # mano: la corrección es subir de rama de Alpine.
-FROM alpine:3.24.2
+FROM alpine:3.24.3
 
 # ca-certificates: si algún día la API habla con un servicio por HTTPS.
 # tzdata: para que las fechas del libro de visitas no salgan siempre en UTC.

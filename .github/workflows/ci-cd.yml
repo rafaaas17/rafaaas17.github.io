@@ -86,7 +86,7 @@ jobs:
           echo "OK: los tres Dockerfile pasan Hadolint."
 
       - name: Preparar Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: api/go.mod
           # Reto 1: caché de los módulos descargados y de la caché de
@@ -165,7 +165,7 @@ jobs:
         run: npm test -- --reporter=default --reporter=json --outputFile.json=vitest.json
 
       - name: Preparar Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: api/go.mod
           # Reto 1: caché de los módulos descargados y de la caché de
